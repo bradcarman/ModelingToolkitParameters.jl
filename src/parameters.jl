@@ -1,6 +1,9 @@
 abstract type Params end
 
-function params(model::Function)
+function params(model::Function, globals::Union{Function, Nothing} = nothing)
+
+
+
 
   # Generate the struct name: FunctionName -> FunctionNameParams
   struct_name = Symbol(string(model) * "Params")
@@ -17,6 +20,12 @@ function params(model::Function)
   pars = ModelingToolkit.get_ps(temp_instance)
   systems = ModelingToolkit.get_systems(temp_instance)
   
+
+  if !isnothing(globals)
+    @named g = globals()
+    gs = ModelingToolkit.get_ps(g)
+    append!(pars, gs)
+  end
     
   # Build the struct fields
   exprs = String[]
@@ -168,6 +177,9 @@ function Base.copy(x::T) where T
 
   return T(NamedTuple(kwargs)...)
 end
+
+# fallback value conversion
+convert_value(x) = x
 
 function save_parameters(x::T, filepath::String) where T <: Params
 
