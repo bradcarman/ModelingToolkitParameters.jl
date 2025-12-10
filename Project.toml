@@ -1,7 +1,7 @@
 name = "ModelingToolkitParameters"
 uuid = "d96c1b6d-73fa-42cf-8af9-45e6140feccb"
 authors = ["Brad Carman <bradleygcarman@outlook.com>"]
-version = "0.2.0"
+version = "0.3.0"
 
 [deps]
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"

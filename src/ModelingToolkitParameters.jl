@@ -6,7 +6,7 @@ using SciMLBase
 using InteractiveUtils: clipboard
 using JuliaFormatter: format_text
 
-export  Params, params, pmap, cache, update!, remake
+export  Params, params, pmap, cache, update!
 
 abstract type Params end
 
@@ -250,11 +250,37 @@ function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.Par
   return prob
 end
 
-function remake(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_map::Vector{<:Pair})
+
+function SciMLBase.remake(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_map::Vector{<:Pair})
     prob′ = SciMLBase.remake(prob)
     update!(prob′, setters, param_map)
-    return SciMLBase.remake(prob′)
+    # return SciMLBase.remake(prob′) # Note: using remake a 2nd time could be implemented to provide initialization for solvable parameters, see example below...
+    return prob′
 end
 
+#=
+pars = @parameters begin
+    total = missing, [guess=0]
+    p = 10
+end
+vars = @variables begin
+    x(t)=0
+    y(t)=1
+end
+eqs = [
+    D(x) ~ y*total
+    x + y + p ~ total
+]
+@mtkcompile sys = System(eqs, t, vars, pars)
+prob = ODEProblem(sys, [], (0, 1))
+prob.ps[total] # = 11
+
+# --------------
+prob2 = remake(prob) # make a copy
+pf(prob2, 20) # set the value
+prob2.ps[sys.total] # =11 total not yet updated
+prob3 = remake(prob2)  # run initialization
+prob3.ps[sys.total] # = 21 total now updated
+=#
 
 end # module ModelingToolkitParameters
