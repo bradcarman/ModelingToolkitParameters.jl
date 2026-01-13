@@ -5,15 +5,23 @@ using Symbolics
 using SciMLBase
 using InteractiveUtils: clipboard
 using JuliaFormatter: format_text
+using TOML
 
 export  Params, params, pmap, cache, update!
 
 abstract type Params end
 
-function params(model::Function, globals::Union{Function, Nothing} = nothing)
+params(model::ModelingToolkit.Model, args...) = params(model.f, args...; stripname=true)
+
+function params(model::Function, globals::Union{Function, Nothing} = nothing; stripname=false, parent::Module=parentmodule(model), defaults=NamedTuple())
+
+  name = string(model)
+  if stripname
+    name = name[3:end-2]
+  end
 
   # Generate the struct name: FunctionName -> FunctionNameParams
-  struct_name = Symbol(string(model) * "Params")
+  struct_name = Symbol(name * "Params")
 
   # The strategy: We'll generate code that:
   # 1. Defines the original function
@@ -21,7 +29,7 @@ function params(model::Function, globals::Union{Function, Nothing} = nothing)
   # 3. Generates the struct based on those parameters
 
   # Create a temporary instance with a dummy name
-  @named temp_instance = model()
+  @named temp_instance = model(; defaults...)
 
   # Get the parameters from the system
   pars = ModelingToolkit.get_ps(temp_instance)
@@ -70,13 +78,24 @@ function params(model::Function, globals::Union{Function, Nothing} = nothing)
       system_type = ModelingToolkit.get_component_type(system).name
       struct_type = Symbol(string(system_type) * "Params")
 
-      if isdefined(parentmodule(model), struct_type)
+      if isdefined(parent, struct_type)
         if add_comment
           push!(exprs, "# systems")
           add_comment = false
         end
 
-        push!(exprs, "$system_name::$struct_type = $struct_type()")
+        names = fieldnames(getproperty(parent, struct_type))
+        defs = ModelingToolkit.defaults(system)
+        values = map(x->getindex(defs, Sym{Real}(x)), names)
+
+        args = String[]
+        for (n,v) in zip(names, values)
+          push!(args, "$n = $v")
+        end
+
+        push!(exprs, "$system_name::$struct_type = $struct_type($(join(args, ",")))")
+      else
+        @warn "$system_name::$struct_type definition not available, skipping"
       end
   end
 
@@ -198,11 +217,26 @@ function save_parameters(x::T, filepath::String) where T <: Params
 
 end
 
+function parameters_to_string(x::T) where T <: Params
+  io = IOBuffer()
+  TOML.print(convert_value, io, Dict(x))
+  return String(take!(io))
+end
+
 function load_parameters(filepath::String, T::Type)
 
   t = T()
 
   setproperty!(t, TOML.parsefile(filepath))
+
+  return t
+end
+
+function string_to_parameters(contents::String, T::Type)
+
+  t = T()
+
+  setproperty!(t, TOML.parse(contents))
 
   return t
 end
