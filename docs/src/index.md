@@ -336,12 +336,14 @@ prob = ODEProblem(model, model=>model_pars, (0, 10))
 
 # Slow Option
 model_pars.seat.body.m = 200                                    # change parameters
-@btime prob2 = remake(prob; p = model => model_pars);           # remake ODEProblem
+time_slow = @belapsed prob2 = remake($prob; p = $model => $model_pars)  # remake ODEProblem
 
 # Fast Option
 model_setters = cache(model, ActiveSuspensionModel.ModelParams);# build cache (one time only)
 
 model_pars.seat.body.m = 300                                    # change parameters
-@btime prob3 = remake(prob, model_setters, model => model_pars);# remake ODEProblem
-# nothing
+time_fast = @belapsed prob3 = remake($prob, $model_setters, $model => $model_pars)  # remake ODEProblem
+
+@show time_slow time_fast # hide
+nothing #hide
 ```
