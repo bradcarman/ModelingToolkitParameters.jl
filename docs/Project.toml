@@ -7,6 +7,6 @@ ModelingToolkitParameters = "d96c1b6d-73fa-42cf-8af9-45e6140feccb"
 SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 
 [sources]
-ActiveSuspensionModel = {url = "https://github.com/bradcarman/ActiveSuspensionModel", path = "ActiveSuspensionModel.jl"}
+ActiveSuspensionModel = {url = "https://github.com/bradcarman/ActiveSuspensionModel", subdir = "ActiveSuspensionModel.jl"}
 
 
