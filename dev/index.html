@@ -219,7 +219,7 @@ end</code></pre><p>The parameter struct can be easily created from this catalog<
     err::AddParams = subtract
     set_point::ConstantParams = ConstantParams()
     flip::GainParams = GainParams(k=-1)
-end</code></pre><h1 id="Speed"><a class="docs-heading-anchor" href="#Speed">Speed</a><a id="Speed-1"></a><a class="docs-heading-anchor-permalink" href="#Speed" title="Permalink"></a></h1><p>As mentioned previously, using the keyword default patern for model parameter setting is not a good way to build several model variations, as this requires fully compiling/simplifying the model from scratch each time.  A better way was shown with ModelingToolkitParameters.jl using <code>remake</code> and proving an updated parameter map.  However, this way is still not the fastest.  The most efficient approach is to use <code>SymbolicIndexingInterface.jl</code>.  </p><pre><code class="language-julia hljs">using ModelingToolkit
+end</code></pre><h1 id="Speed"><a class="docs-heading-anchor" href="#Speed">Speed</a><a id="Speed-1"></a><a class="docs-heading-anchor-permalink" href="#Speed" title="Permalink"></a></h1><p>As mentioned previously, using the keyword default patern for model parameter setting is not a good way to build several model variations, as this requires fully compiling/simplifying the model from scratch each time.  A better way was shown with ModelingToolkitParameters.jl using <code>remake</code> and proving an updated parameter map.  However, this way is still not the fastest.  The most efficient approach is to use <code>SymbolicIndexingInterface.jl</code>.  <code>ModelingToolkitParameters.jl</code> provides a <code>cache</code> function that implements the <code>SymbolicIndexingInterface.jl</code> utility to provide a more efficient use of <code>remake</code>.  The example below demonstrates this comparison.</p><pre><code class="language-julia hljs">using ModelingToolkit
 using ModelingToolkitParameters
 using ActiveSuspensionModel
 using SciMLBase
@@ -231,21 +231,32 @@ prob = ODEProblem(model, model=&gt;model_pars, (0, 10))
 
 # Slow Option
 model_pars.seat.body.m = 200                                    # change parameters
-@btime prob2 = remake(prob; p = model =&gt; model_pars);           # remake ODEProblem
+time_slow = @belapsed prob2 = remake($prob; p = $model =&gt; $model_pars)  # remake ODEProblem
 
 # Fast Option
 model_setters = cache(model, ActiveSuspensionModel.ModelParams);# build cache (one time only)
 
 model_pars.seat.body.m = 300                                    # change parameters
-@btime prob3 = remake(prob, model_setters, model =&gt; model_pars);# remake ODEProblem</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr38_2" style="color:#56b6c2">ODEProblem</span> with uType <span class="sgr38_2" style="color:#56b6c2">Vector{Float64}</span> and tType <span class="sgr38_2" style="color:#56b6c2">Int64</span>. In-place: <span class="sgr38_2" style="color:#56b6c2">true</span>
-Initialization status: <span class="sgr38_2" style="color:#56b6c2">FULLY_DETERMINED</span>
-Non-trivial mass matrix: <span class="sgr38_2" style="color:#56b6c2">false</span>
-timespan: (0, 10)
-u0: 7-element Vector{Float64}:
-  0.5
-  1.0
-  0.0
-  1.5
-  0.0
-  0.0
- -0.0</code></pre></article><nav class="docs-footer"><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Wednesday 11 February 2026 18:26">Wednesday 11 February 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+time_fast = @belapsed prob3 = remake($prob, $model_setters, $model =&gt; $model_pars)  # remake ODEProblem</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">p = g
+p = seat₊damper₊d
+p = seat₊body₊m
+p = seat₊spring₊k
+p = car_and_suspension₊damper₊d
+p = car_and_suspension₊body₊m
+p = car_and_suspension₊spring₊k
+p = wheel₊damper₊d
+p = wheel₊body₊m
+p = wheel₊spring₊k
+p = road_data₊bump
+p = road_data₊freq
+p = road_data₊offset
+p = road_data₊loop
+p = pid₊kp
+p = pid₊ki
+p = pid₊kd
+p = err₊k1
+p = err₊k2
+p = set_point₊k
+p = flip₊k
+time_slow = 0.167059828
+time_fast = 0.000235632</code></pre></article><nav class="docs-footer"><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Wednesday 11 February 2026 19:21">Wednesday 11 February 2026</span>. Using Julia version 1.12.5.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
