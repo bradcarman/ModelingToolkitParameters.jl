@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>Home · ModelingToolkitParameters.jl</title><meta name="title" content="Home · ModelingToolkitParameters.jl"/><meta property="og:title" content="Home · ModelingToolkitParameters.jl"/><meta property="twitter:title" content="Home · ModelingToolkitParameters.jl"/><meta name="description" content="Documentation for ModelingToolkitParameters.jl."/><meta property="og:description" content="Documentation for ModelingToolkitParameters.jl."/><meta property="twitter:description" content="Documentation for ModelingToolkitParameters.jl."/><meta property="og:url" content="https://bradcarman.github.io/ModelingToolkitParameters.jl/"/><meta property="twitter:url" content="https://bradcarman.github.io/ModelingToolkitParameters.jl/"/><link rel="canonical" href="https://bradcarman.github.io/ModelingToolkitParameters.jl/"/><script data-outdated-warner src="assets/warner.js"></script><link href="https://cdnjs.cloudflare.com/ajax/libs/lato-font/3.0.0/css/lato-font.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/juliamono/0.050/juliamono.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/fontawesome.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/solid.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/brands.min.css" rel="stylesheet" type="text/css"/><link href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.8/katex.min.css" rel="stylesheet" type="text/css"/><script>documenterBaseURL="."</script><script src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.6/require.min.js" data-main="assets/documenter.js"></script><script src="search_index.js"></script><script src="siteinfo.js"></script><script src="../versions.js"></script><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-mocha.css" data-theme-name="catppuccin-mocha"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-macchiato.css" data-theme-name="catppuccin-macchiato"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-frappe.css" data-theme-name="catppuccin-frappe"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/catppuccin-latte.css" data-theme-name="catppuccin-latte"/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-dark.css" data-theme-name="documenter-dark" data-theme-primary-dark/><link class="docs-theme-link" rel="stylesheet" type="text/css" href="assets/themes/documenter-light.css" data-theme-name="documenter-light" data-theme-primary/><script src="assets/themeswap.js"></script></head><body><div id="documenter"><nav class="docs-sidebar"><div class="docs-package-name"><span class="docs-autofit"><a href>ModelingToolkitParameters.jl</a></span></div><button class="docs-search-query input is-rounded is-small is-clickable my-2 mx-auto py-1 px-2" id="documenter-search-query">Search docs (Ctrl + /)</button><ul class="docs-menu"><li class="is-active"><a class="tocitem" href>Home</a><ul class="internal"><li class="toplevel"><a class="tocitem" href="#A-Better-Way"><span>A Better Way</span></a></li><li><a class="tocitem" href="#Model-Heirarchy-and-Catalogs"><span>Model Heirarchy and Catalogs</span></a></li><li class="toplevel"><a class="tocitem" href="#Speed"><span>Speed</span></a></li></ul></li></ul><div class="docs-version-selector field has-addons"><div class="control"><span class="docs-label button is-static is-size-7">Version</span></div><div class="docs-selector control is-expanded"><div class="select is-fullwidth is-size-7"><select id="documenter-version-selector"></select></div></div></div></nav><div class="docs-main"><header class="docs-navbar"><a class="docs-sidebar-button docs-navbar-link fa-solid fa-bars is-hidden-desktop" id="documenter-sidebar-button" href="#"></a><nav class="breadcrumb"><ul class="is-hidden-mobile"><li class="is-active"><a href>Home</a></li></ul><ul class="is-hidden-tablet"><li class="is-active"><a href>Home</a></li></ul></nav><div class="docs-right"><a class="docs-navbar-link" href="https://github.com/bradcarman/ModelingToolkitParameters.jl" title="View the repository on GitHub"><span class="docs-icon fa-brands"></span><span class="docs-label is-hidden-touch">GitHub</span></a><a class="docs-navbar-link" href="https://github.com/bradcarman/ModelingToolkitParameters.jl/blob/main/docs/src/index.md" title="Edit source on GitHub"><span class="docs-icon fa-solid"></span></a><a class="docs-settings-button docs-navbar-link fa-solid fa-gear" id="documenter-settings-button" href="#" title="Settings"></a><a class="docs-article-toggle-button fa-solid fa-chevron-up" id="documenter-article-toggle-button" href="javascript:;" title="Collapse all docstrings"></a></div></header><article class="content" id="documenter-page"><h1 id="ModelingToolkitParameters-Introduction-and-Motivation"><a class="docs-heading-anchor" href="#ModelingToolkitParameters-Introduction-and-Motivation">ModelingToolkitParameters - Introduction and Motivation</a><a id="ModelingToolkitParameters-Introduction-and-Motivation-1"></a><a class="docs-heading-anchor-permalink" href="#ModelingToolkitParameters-Introduction-and-Motivation" title="Permalink"></a></h1><p>Currently the standard way to build parameters up in ModelingToolkit models is with the following pattern of keyword arguments with default values.  </p><pre><code class="language-julia hljs">using ModelingToolkit
+using ModelingToolkit: t_nounits as t, D_nounits as D
+using OrdinaryDiffEq
+
+@component function Motor(; name, k = 0.1, r = 0.01, l = 1e-3)
+  pars = @parameters begin
+    k = k
+    r = r
+    l = l
+  end
+  vars = @variables begin
+    v(t)
+    dphi(t) = 0
+    i(t) = 0
+    di(t)
+  end
+  eqs = Equation[
+    D(i) ~ di
+    v ~ i * r + l * di + dphi * k
+    D(dphi) ~ k * i
+    v ~ sin(t)
+  ]
+
+  return ODESystem(eqs, t, vars, pars; name)
+end</code></pre><p>This patern heavily relies on the <code>defaults</code> mechanism of the model to actually set the parameters of the model.  Let say we want <code>k, r, l</code> to be <code>1, 2, 3</code>.  One way we can do this is</p><pre><code class="language-julia hljs">@mtkbuild sys = Motor(k=1, r=2, l=3)</code></pre><p>This is simple enough, but what if we want another instance with <code>k, r, l</code> to be <code>4, 5, 6</code>?  Should we fully rebuild the model?  Instead it&#39;s better to set parameters at the ODEProblem level...</p><pre><code class="language-julia hljs">@mtkbuild sys = Motor()
+prob = ODEProblem(sys, [], (0,1))
+
+prob1 = remake(prob; p = [sys.k =&gt; 1, sys.r =&gt; 2, sys.l =&gt; 3])
+prob2 = remake(prob; p = [sys.k =&gt; 4, sys.r =&gt; 5, sys.l =&gt; 6])</code></pre><p>Note, now we are <strong>not</strong> using the keyword arguments of the model constructor.  Instead we are building the parameter map from scratch.  Therefore, the cons of the keyword model construction pattern are:</p><ol><li>makes the model interface more complicated.  As the list of parameters grows, the keyword list becomes un-manageable</li><li>it&#39;s essentially useless if more than one model instance is needed</li><li>building a parameter map for <code>remake</code> still needs to be done from scratch.  (We could get the <code>defaults</code> dictionary of the model, but we still need to index into each parameter with <code>sys.k</code>, <code>sys.r</code>, etc.)</li></ol><p>The additional problems with this pattern are:</p><ol><li>there are no ways to enforce parameter settings rules with useful error messages, for example ensuring postive numbers </li><li>parameter maps are not easy to work with since they are flat</li><li>parameter maps are not printed with heirarcy and are therefore not easily saved/retrieved to/from file using TOML or JSON</li></ol><h1 id="A-Better-Way"><a class="docs-heading-anchor" href="#A-Better-Way">A Better Way</a><a id="A-Better-Way-1"></a><a class="docs-heading-anchor-permalink" href="#A-Better-Way" title="Permalink"></a></h1><p>ModelingToolkitParameters.jl exports an abstract type <code>Params</code> that can be used to build parameter maps using Julia structs.  The <code>Motor</code> component can now be defined as follows where a mutable Julia struct <code>MotorParams</code> is defined with the same names as the <code>Motor</code> component parameters.</p><pre><code class="language-julia hljs">using ModelingToolkitParameters
+@kwdef mutable struct MotorParams &lt;: Params
+    k::Float64 = 0.1
+    r::Float64 = 0.01
+    l::Float64 = 1e-3
+end
+
+@component function Motor(; name)
+  pars = @parameters begin
+    k 
+    r
+    l
+  end
+  vars = @variables begin
+    v(t)
+    dphi(t) = 0
+    i(t) = 0
+    di(t)
+  end
+  eqs = Equation[
+    D(i) ~ di
+    v ~ i * r + l * di + dphi * k
+    D(dphi) ~ k * i
+    v ~ sin(t)
+  ]
+
+  return ODESystem(eqs, t, vars, pars; name)
+end</code></pre><p>Now we can build the parameter map by asking for the pair (=&gt;):  <code>sys::ModelingToolkit.System =&gt; p::MotorParams</code>, for example</p><pre><code class="language-julia hljs">@mtkbuild sys = Motor()
+motor_pars = MotorParams(k=1,r=2,l=3)
+
+pmap = sys =&gt; motor_pars</code></pre><p>Gives...</p><pre><code class="nohighlight hljs">3-element Vector{Pair}:
+ k =&gt; 1.0
+ r =&gt; 2.0
+ l =&gt; 3.0</code></pre><p>Now we can easily modify parameters using the Julia parameter struct <code>motor_pars</code>.  Like</p><pre><code class="language-julia hljs">prob = ODEProblem(sys, pmap, (0.1))
+
+motor_pars2 = copy(motor_pars)
+motor_pars2.k = 4.0
+
+prob2 = remake(prob; p = sys =&gt; motor_pars2)</code></pre><p>Now that our parameters are generated from a Julia struct we have many additional benefits, we can:</p><ul><li>use <code>getproperty</code> to set rules</li><li>define <code>print</code> rules (and save/load from file easily)</li><li>define <code>copy</code> </li><li>define constructors</li></ul><h2 id="Model-Heirarchy-and-Catalogs"><a class="docs-heading-anchor" href="#Model-Heirarchy-and-Catalogs">Model Heirarchy and Catalogs</a><a id="Model-Heirarchy-and-Catalogs-1"></a><a class="docs-heading-anchor-permalink" href="#Model-Heirarchy-and-Catalogs" title="Permalink"></a></h2><p>As we move into heirarcal models, we can continue the patern of defining a <code>struct</code> that maps to the component, however we now add the parameters and the child systems.  We will build a <code>MassSpringDamper</code> component that has the child systems <code>Mass</code>, <code>Spring</code>, and <code>Damper</code>. The Active Suspension model seen here <a href="https://github.com/bradcarman/ActiveSuspensionModel/tree/main/ActiveSuspensionModel.jl">https://github.com/bradcarman/ActiveSuspensionModel/tree/main/ActiveSuspensionModel.jl</a> defines the simple mass, spring, damper components like</p><pre><code class="language-julia hljs">Base.@kwdef mutable struct MassParams &lt;: Params
+    m::Real
+end
+
+@component function Mass(; name)
+    pars = @parameters begin
+        m
+    end
+    vars = @variables begin
+        s(t)
+        v(t)
+        f(t)
+        a(t)
+    end
+    systems = @named begin
+        globals = Globals()
+        flange = MechanicalPort()
+    end 
+
+    @unpack g = globals
+    
+    eqs = [
+        s ~ flange.x
+        f ~ flange.f
+
+        D(s) ~ v
+        D(v) ~ a
+        m*a ~ f + m*g
+    ]
+    return System(eqs, t, vars, pars; name, systems)
+end
+
+# ------------------------------------------------
+
+Base.@kwdef mutable struct SpringParams &lt;: Params
+    k::Real
+end
+
+@component function Spring(; name)
+    pars = @parameters begin
+        k
+        initial_stretch=missing, [guess=0]
+    end
+    vars = @variables begin
+        delta_s(t)
+        f(t)
+    end
+    systems = @named begin
+        flange_a = MechanicalPort()
+        flange_b = MechanicalPort()
+    end 
+    eqs = [
+        delta_s ~ (flange_a.x - flange_b.x) + initial_stretch
+        f ~ k * delta_s
+        flange_a.f ~ +f
+        flange_b.f ~ -f
+    ]
+    return System(eqs, t, vars, pars; name, systems)
+end
+
+# ------------------------------------------------
+
+Base.@kwdef mutable struct DamperParams &lt;: Params
+    d::Real
+end
+
+@component function Damper(; name)
+    pars = @parameters begin
+        d
+    end
+    vars = @variables begin
+        delta_s(t), [guess=0]
+        f(t), [guess=0]
+    end
+    systems = @named begin
+        flange_a = MechanicalPort()
+        flange_b = MechanicalPort()
+    end 
+    eqs = [
+        delta_s ~ flange_a.x - flange_b.x
+        f ~ D(delta_s) * d
+        flange_a.f ~ +f
+        flange_b.f ~ -f
+    ]
+    return System(eqs, t, vars, pars; name, systems)
+end</code></pre><p>Now, we can build a composite component MassSpringDamper</p><pre><code class="language-julia hljs">@component function MassSpringDamper(;name)
+
+    systems = @named begin
+        damper = Damper()
+        body = Mass()
+        spring = Spring()
+        port_m = MechanicalPort()
+        port_sd = MechanicalPort()        
+    end
+
+    eqs = [       
+        connect(damper.flange_a, spring.flange_a, body.flange, port_m)
+        connect(port_sd, spring.flange_b, damper.flange_b)
+    ]
+
+    return System(eqs, t, [], []; systems, name)
+end</code></pre><p>This component&#39;s parameter struct is then comprised of matching names of the child systems</p><pre><code class="language-julia hljs">Base.@kwdef mutable struct MassSpringDamperParams &lt;: Params
+    # systems
+    damper::DamperParams = DamperParams()
+    body::MassParams = MassParams()
+    spring::SpringParams = SpringParams()
+end</code></pre><p>This model will require several <code>MassSpringDampers</code> representing the wheels, the car and suspension, and the seat and passanger.  We can build a Catalog of these components easily like</p><pre><code class="language-julia hljs">const seat = MassSpringDamperParams(;body=MassParams(m=100), spring=SpringParams(k=1000), damper=DamperParams(d=1))
+const car = MassSpringDamperParams(;body=MassParams(m=1000), spring=SpringParams(k=1e4), damper=DamperParams(d=10))
+const wheel = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringParams(k=1e2), damper=DamperParams(d=1e4))</code></pre><p>Now when we build the top level model</p><pre><code class="language-julia hljs">@component function Model(; name)
+
+    systems = @named begin
+        seat = MassSpringDamper()
+        car_and_suspension = MassSpringDamper()
+        wheel = MassSpringDamper()
+        road_data = Road()
+        road = Position()
+        force = Force()
+        pid = Controller()
+        err = Add() 
+        set_point = Constant()
+        seat_pos = PositionSensor()
+        flip = Gain()
+    end
+
+    eqs = [
+        
+        # mechanical model
+        connect(road.s, road_data.output)
+        connect(road.flange, wheel.port_sd)
+        connect(wheel.port_m, car_and_suspension.port_sd)
+        connect(car_and_suspension.port_m, seat.port_sd, force.flange_a)
+        connect(seat.port_m, force.flange_b, seat_pos.flange)
+        
+        # controller        
+        connect(err.input1, seat_pos.output)
+        connect(err.input2, set_point.output)
+        connect(pid.err_input, err.output)
+        connect(pid.ctr_output, flip.input)
+        connect(flip.output, force.f)        
+    ]
+
+    return System(eqs, t, [], []; systems, name)
+end</code></pre><p>The parameter struct can be easily created from this catalog</p><pre><code class="language-julia hljs">Base.@kwdef mutable struct ModelParams &lt;: Params
+    # parameters
+    g::Real = g
+    # systems
+    seat::MassSpringDamperParams = seat
+    car_and_suspension::MassSpringDamperParams = car
+    wheel::MassSpringDamperParams = wheel
+    road_data::RoadParams = RoadParams()
+    pid::ControllerParams = ControllerParams()
+    err::AddParams = subtract
+    set_point::ConstantParams = ConstantParams()
+    flip::GainParams = GainParams(k=-1)
+end</code></pre><h1 id="Speed"><a class="docs-heading-anchor" href="#Speed">Speed</a><a id="Speed-1"></a><a class="docs-heading-anchor-permalink" href="#Speed" title="Permalink"></a></h1><p>As mentioned previously, using the keyword default patern for model parameter setting is not a good way to build several model variations, as this requires fully compiling/simplifying the model from scratch each time.  A better way was shown with ModelingToolkitParameters.jl using <code>remake</code> and proving an updated parameter map.  However, this way is still not the fastest.  The most efficient approach is to use <code>SymbolicIndexingInterface.jl</code>.  </p><pre><code class="language-julia hljs">using ModelingToolkit
+using ModelingToolkitParameters
+using ActiveSuspensionModel
+using SciMLBase
+using BenchmarkTools
+
+@mtkcompile model = ActiveSuspensionModel.Model()
+model_pars = ActiveSuspensionModel.ModelParams()
+prob = ODEProblem(model, model=&gt;model_pars, (0, 10))
+
+# Slow Option
+model_pars.seat.body.m = 200                                    # change parameters
+@btime prob2 = remake(prob; p = model =&gt; model_pars);           # remake ODEProblem
+
+# Fast Option
+model_setters = cache(model, ActiveSuspensionModel.ModelParams);# build cache (one time only)
+
+model_pars.seat.body.m = 300                                    # change parameters
+@btime prob3 = remake(prob, model_setters, model =&gt; model_pars);# remake ODEProblem</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi"><span class="sgr38_2" style="color:#56b6c2">ODEProblem</span> with uType <span class="sgr38_2" style="color:#56b6c2">Vector{Float64}</span> and tType <span class="sgr38_2" style="color:#56b6c2">Int64</span>. In-place: <span class="sgr38_2" style="color:#56b6c2">true</span>
+Initialization status: <span class="sgr38_2" style="color:#56b6c2">FULLY_DETERMINED</span>
+Non-trivial mass matrix: <span class="sgr38_2" style="color:#56b6c2">false</span>
+timespan: (0, 10)
+u0: 7-element Vector{Float64}:
+  0.5
+  1.0
+  0.0
+  1.5
+  0.0
+  0.0
+ -0.0</code></pre></article><nav class="docs-footer"><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.16.1 on <span class="colophon-date" title="Tuesday 3 February 2026 06:21">Tuesday 3 February 2026</span>. Using Julia version 1.12.4.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
