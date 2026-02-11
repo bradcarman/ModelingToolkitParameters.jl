@@ -320,7 +320,7 @@ end
 ```
 
 # Speed
-As mentioned previously, using the keyword default patern for model parameter setting is not a good way to build several model variations, as this requires fully compiling/simplifying the model from scratch each time.  A better way was shown with ModelingToolkitParameters.jl using `remake` and proving an updated parameter map.  However, this way is still not the fastest.  The most efficient approach is to use `SymbolicIndexingInterface.jl`.  
+As mentioned previously, using the keyword default patern for model parameter setting is not a good way to build several model variations, as this requires fully compiling/simplifying the model from scratch each time.  A better way was shown with ModelingToolkitParameters.jl using `remake` and proving an updated parameter map.  However, this way is still not the fastest.  The most efficient approach is to use `SymbolicIndexingInterface.jl`.  `ModelingToolkitParameters.jl` provides a `cache` function that implements the `SymbolicIndexingInterface.jl` utility to provide a more efficient use of `remake`.  The example below demonstrates this comparison.
 
 
 ```@example 
@@ -343,4 +343,5 @@ model_setters = cache(model, ActiveSuspensionModel.ModelParams);# build cache (o
 
 model_pars.seat.body.m = 300                                    # change parameters
 @btime prob3 = remake(prob, model_setters, model => model_pars);# remake ODEProblem
+# nothing
 ```
