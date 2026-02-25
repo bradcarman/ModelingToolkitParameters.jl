@@ -12,6 +12,12 @@ SymbolicIndexingInterface = "2efcf032-c050-4f8e-a9bb-153293bab1f5"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
+[extras]
+Test = "8dfed614-e22c-358e-b4b6-18b62bdc3e49"
+
+[targets]
+test = ["Test"]
+
 [compat]
 InteractiveUtils = "1.11.0"
 JuliaFormatter = "2.2.0"
