@@ -9,10 +9,28 @@ using TOML
 
 export  Params, params, pmap, cache, update!
 
+"""
+    Params
+
+Abstract supertype for all generated parameter structs.
+"""
 abstract type Params end
 
-params(model::ModelingToolkit.Model, args...) = params(model.f, args...; stripname=true)
+@static if pkgversion(ModelingToolkit) < v"11"
+  # support for the @mtkmodel macro
+  params(model::ModelingToolkit.Model, args...) = params(model.f, args...; stripname=true)
+end
 
+"""
+    params(model::Function, globals=nothing; stripname=false, parent=parentmodule(model), defaults=NamedTuple())
+
+Inspect a ModelingToolkit component function and generate the corresponding `Params` struct
+definition. The struct definition is printed to the REPL and copied to the clipboard.
+`globals` is an optional second component function whose parameters are appended as
+top-level fields. `defaults` can be used to pass keyword arguments when instantiating
+the component for introspection.  Use `parent` to specify the module where child `System` 
+definitions can be found if located in a different module from `model`.
+"""
 function params(model::Function, globals::Union{Function, Nothing} = nothing; stripname=false, parent::Module=parentmodule(model), defaults=NamedTuple())
 
   name = string(model)
@@ -86,16 +104,18 @@ function params(model::Function, globals::Union{Function, Nothing} = nothing; st
 
         names = fieldnames(getproperty(parent, struct_type))
         defs = ModelingToolkit.defaults(system)
-        values = map(x->getindex(defs, Sym{Real}(x)), names)
+        values = map(x->haskey(defs, Sym{Real}(x)) ? getindex(defs, Sym{Real}(x)) : nothing, names)
 
         args = String[]
         for (n,v) in zip(names, values)
-          push!(args, "$n = $v")
+          if !isnothing(v)
+            push!(args, "$n = $v")
+          end
         end
 
         push!(exprs, "$system_name::$struct_type = $struct_type($(join(args, ",")))")
       else
-        @warn "$system_name::$struct_type definition not available, skipping"
+        @warn "$system_name::$struct_type definition not available in $parent, skipping"
       end
   end
 
@@ -117,9 +137,19 @@ end
 
 # (::Type{T})(globals; kwargs...) where T <: Params = T(;globals, kwargs...)
 
-# build a parameter map ------------------------------
+"""
+    pmap(model::ODESystem, pars::Params)
+
+Return a parameter map suitable for passing to `ODEProblem`, `update!` or `SciMLBase.remake`.
+"""
 pmap(model::ODESystem, pars::T) where T <: Params  = model => pars
 
+
+"""
+    Pair(model::ODESystem, pars::T) where T <: Params  
+
+Return a parameter map suitable for passing to `ODEProblem`, `update!` or `SciMLBase.remake`.
+"""
 function Base.Pair(model::ODESystem, pars::T) where T <: Params  
 
   prs = Pair[]
@@ -209,6 +239,11 @@ end
 # fallback value conversion
 convert_value(x) = x
 
+"""
+    save_parameters(x::Params, filepath::String)
+
+Serialize `x` to a TOML file at `filepath`. 
+"""
 function save_parameters(x::T, filepath::String) where T <: Params
 
   open(filepath, "w") do io
@@ -217,12 +252,23 @@ function save_parameters(x::T, filepath::String) where T <: Params
 
 end
 
+"""
+    parameters_to_string(x::Params)
+
+Convert `x` to TOML string
+"""
 function parameters_to_string(x::T) where T <: Params
   io = IOBuffer()
   TOML.print(convert_value, io, Dict(x))
   return String(take!(io))
 end
 
+"""
+    load_parameters(filepath::String, T::Type)
+
+Read a TOML file written by `save_parameters` and return a new instance of `T` with
+the stored values applied.
+"""
 function load_parameters(filepath::String, T::Type)
 
   t = T()
@@ -232,6 +278,12 @@ function load_parameters(filepath::String, T::Type)
   return t
 end
 
+"""
+    string_to_parameters(contents::String, T::Type)
+
+Parse a TOML string and return a new instance of `T`
+with the stored values applied.
+"""
 function string_to_parameters(contents::String, T::Type)
 
   t = T()
@@ -242,7 +294,14 @@ function string_to_parameters(contents::String, T::Type)
 end
 
 
-# build setters cache --------------------------
+"""
+    cache(model::ODESystem, T::Type{<:Params}; parent=model)
+
+Pre-build a `Vector{ParameterHookWrapper}` of setter functions for every parameter
+field in `T`. Pass the returned vector to `update!` to efficiently modify an
+`ODEProblem` without rebuilding the setters on each call. `parent` should be the
+top-level system when `model` is a subsystem.
+"""
 function cache(model::ODESystem, T::Type{<:Params}; parent=model)
 
   prs = SymbolicIndexingInterface.ParameterHookWrapper[]
@@ -264,7 +323,13 @@ function cache(model::ODESystem, T::Type{<:Params}; parent=model)
 end
 
 
-# Update an ODEProblem with modified parameter values
+"""
+    update!(prob::ODEProblem, setters::Vector{ParameterHookWrapper}, param_map::Vector{<:Pair})
+
+Mutate `prob` in-place by applying each setter in `setters` whose parameter appears in
+`param_map`. Obtain `setters` from `cache` and `param_map` from `Base.Pair(model, pars)`
+or `pmap`. Returns `prob`.
+"""
 function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_map::Vector{<:Pair})
 
   # Create a dictionary for fast lookup

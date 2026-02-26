@@ -323,7 +323,7 @@ end
 As mentioned previously, using the keyword default patern for model parameter setting is not a good way to build several model variations, as this requires fully compiling/simplifying the model from scratch each time.  A better way was shown with ModelingToolkitParameters.jl using `remake` and proving an updated parameter map.  However, this way is still not the fastest.  The most efficient approach is to use `SymbolicIndexingInterface.jl`.  `ModelingToolkitParameters.jl` provides a `cache` function that implements the `SymbolicIndexingInterface.jl` utility to provide a more efficient use of `remake`.  The example below demonstrates this comparison.
 
 
-```@example 
+```@example speed
 using ModelingToolkit
 using ModelingToolkitParameters
 using ActiveSuspensionModel
@@ -346,4 +346,46 @@ time_fast = @belapsed prob3 = remake($prob, $model_setters, $model => $model_par
 
 @show time_slow time_fast # hide
 nothing #hide
+```
+
+
+# Saving and Loading Parameters
+The advantage of storing parameters into structs is that they can now be easily saved and loaded from text file.  The code below will demonstrate how to use the TOML format to create parameter files.  The TOML library in Julia can easily write out code if the data is in a dictionary.  We can easily convert our parameter structs to dictionary.
+
+```@example speed
+Dict(model_pars)
+```
+
+Saving with TOML format (which can easily print from a `Dict`) can be done using
+
+```julia
+save_parameters(model_pars, "model_pars.toml")
+```
+
+This will save out a file that looks like...
+
+```@example speed
+using TOML
+TOML.print(ModelingToolkitParameters.convert_value, Dict(model_pars))
+```
+
+_Note: `convert_value` can be used to help with saving complex types.  See TOML documentation for more information._
+
+
+Then loading from file is done with `load_parameters(filepath::String, T::Type)` where `T` is the matching parameter struct type...
+
+```julia; results="hidden"
+model_pars = load_parameters("model_pars.toml", ActiveSuspensionModel.ModelParams) 
+```
+
+From text, this works like the following
+
+```@example speed
+p = ActiveSuspensionModel.RoadParams()
+setproperty!(p, TOML.parse("""
+                          bump = 0.3
+                          freq = 0.75
+                          offset = 3
+                          """))
+Dict(p)
 ```
