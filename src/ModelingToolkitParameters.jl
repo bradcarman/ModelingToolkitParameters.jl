@@ -138,19 +138,19 @@ end
 # (::Type{T})(globals; kwargs...) where T <: Params = T(;globals, kwargs...)
 
 """
-    pmap(model::ODESystem, pars::Params)
+    pmap(model::System, pars::Params)
 
 Return a parameter map suitable for passing to `ODEProblem`, `update!` or `SciMLBase.remake`.
 """
-pmap(model::ODESystem, pars::T) where T <: Params  = model => pars
+pmap(model::System, pars::T) where T <: Params  = model => pars
 
 
 """
-    Pair(model::ODESystem, pars::T) where T <: Params  
+    Pair(model::System, pars::T) where T <: Params  
 
 Return a parameter map suitable for passing to `ODEProblem`, `update!` or `SciMLBase.remake`.
 """
-function Base.Pair(model::ODESystem, pars::T) where T <: Params  
+function Base.Pair(model::System, pars::T) where T <: Params  
 
   prs = Pair[]
   for nm in fieldnames(T)
@@ -205,13 +205,13 @@ function Base.setproperty!(x::T, dict::Dict) where T <: Params
 end
 
 #TODO: doesn't work, why?
-# function Base.setproperty!(sys::ODESystem, x::T) where T <: Params
+# function Base.setproperty!(sys::System, x::T) where T <: Params
 #   defs = ModelingToolkit.defaults(sys)
 #   setproperty!(defs, x, sys)
 # end
 
 
-function Base.setproperty!(dict::Dict, x::T, sys::ODESystem) where T <: Params
+function Base.setproperty!(dict::Dict, x::T, sys::System) where T <: Params
   for nm in fieldnames(T)
     prop = getproperty(x, nm)
     if prop isa Params
@@ -295,14 +295,14 @@ end
 
 
 """
-    cache(model::ODESystem, T::Type{<:Params}; parent=model)
+    cache(model::System, T::Type{<:Params}; parent=model)
 
 Pre-build a `Vector{ParameterHookWrapper}` of setter functions for every parameter
 field in `T`. Pass the returned vector to `update!` to efficiently modify an
 `ODEProblem` without rebuilding the setters on each call. `parent` should be the
 top-level system when `model` is a subsystem.
 """
-function cache(model::ODESystem, T::Type{<:Params}; parent=model)
+function cache(model::System, T::Type{<:Params}; parent=model)
 
   prs = SymbolicIndexingInterface.ParameterHookWrapper[]
   for nm in fieldnames(T)
