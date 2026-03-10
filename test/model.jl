@@ -1,9 +1,13 @@
 using ModelingToolkit
 using ModelingToolkit: D_nounits as D, t_nounits as t
 
-@connector Pin begin
-    v(t)
-    i(t), [connect = Flow]
+@connector function Pin(;name)
+    vars = @variables begin
+        v(t)
+        i(t), [connect = Flow]    
+    end
+    
+    return System(Equation[], t, vars, []; name)
 end
 
 @component function Ground(; name)

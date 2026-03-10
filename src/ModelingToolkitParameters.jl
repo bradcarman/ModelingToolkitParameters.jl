@@ -103,8 +103,16 @@ function params(model::Function, globals::Union{Function, Nothing} = nothing; st
         end
 
         names = fieldnames(getproperty(parent, struct_type))
-        defs = ModelingToolkit.defaults(system)
-        values = map(x->haskey(defs, Sym{Real}(x)) ? getindex(defs, Sym{Real}(x)) : nothing, names)
+        defs = if isdefined(ModelingToolkit, :initial_conditions) # only defined on MTK v11, not v10 and below
+            ModelingToolkit.initial_conditions(system)
+        else
+            ModelingToolkit.defaults(system)
+        end
+        sub_pars = ModelingToolkit.get_ps(system)
+        values = map(names) do nm
+          par_idx = findfirst(p -> Symbol(ModelingToolkit.getname(p)) == nm, sub_pars)
+          par_idx !== nothing ? get(defs, sub_pars[par_idx], nothing) : nothing
+        end
 
         args = String[]
         for (n,v) in zip(names, values)

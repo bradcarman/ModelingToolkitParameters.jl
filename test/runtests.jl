@@ -13,7 +13,7 @@ prob = ODEProblem(rc_model, rc_model => rc_model_params, (0, 10.0))
 # slow but easy update method...
 rc_model_params.resistor.R = 1.5                            # change param struct 
 prob′ = remake(prob; p = rc_model => rc_model_params)       # remake prob (standard call with new pmap)
-@test prob.ps[rc_model.resistor.R] == 1.5                   # check parameter update
+@test prob′.ps[rc_model.resistor.R] == 1.5                   # check parameter update
 
 
 # fast update method (mutate prob)...
@@ -34,4 +34,5 @@ prob′ = remake(prob, setters, rc_model => rc_model_params)   # use remake with
 
 
 
-p = ModelingToolkitParameters.params(RCModel)
+ModelingToolkitParameters.params(RCModel)
+@test clipboard() == "Base.@kwdef mutable struct RCModelParams <: Params\n    # systems\n    resistor::ResistorParams = ResistorParams()\n    capacitor::CapacitorParams = CapacitorParams()\n    source::ConstantVoltageParams = ConstantVoltageParams()\nend\n"
