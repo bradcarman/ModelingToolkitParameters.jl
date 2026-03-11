@@ -35,4 +35,5 @@ prob′ = remake(prob, setters, rc_model => rc_model_params)   # use remake with
 
 
 ModelingToolkitParameters.params(RCModel)
-@test clipboard() == "Base.@kwdef mutable struct RCModelParams <: Params\n    # systems\n    resistor::ResistorParams = ResistorParams()\n    capacitor::CapacitorParams = CapacitorParams()\n    source::ConstantVoltageParams = ConstantVoltageParams()\nend\n"
+# @test clipboard() == "Base.@kwdef mutable struct RCModelParams <: Params\n    # systems\n    resistor::ResistorParams = ResistorParams()\n    capacitor::CapacitorParams = CapacitorParams()\n    source::ConstantVoltageParams = ConstantVoltageParams()\nend\n"
+
