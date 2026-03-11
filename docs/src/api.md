@@ -11,7 +11,7 @@ ModelingToolkitParameters.params
 
 ```@docs
 ModelingToolkitParameters.pmap
-Base.Pair(::ODESystem, ::Params)
+Base.Pair(::ModelingToolkit.System, ::Params)
 ```
 
 ## Caching and Updates
