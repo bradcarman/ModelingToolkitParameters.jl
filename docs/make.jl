@@ -1,4 +1,5 @@
 using ModelingToolkitParameters
+using ModelingToolkit
 using Documenter
 
 # DocMeta.setdocmeta!(ModelingToolkitParameters, :DocTestSetup, :(using ModelingToolkitParameters); recursive=true)
