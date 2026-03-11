@@ -75,7 +75,11 @@ function params(model::Function, globals::Union{Function, Nothing} = nothing; st
       par_type = Symbolics.symtype(par)
 
       # Get default value if available
-      defaults = ModelingToolkit.get_defaults(temp_instance)
+      defaults = if isdefined(ModelingToolkit, :initial_conditions) # only defined on MTK v11, not v10 and below
+          ModelingToolkit.initial_conditions(temp_instance)
+      else
+          ModelingToolkit.defaults(temp_instance)
+      end
       default_val = get(defaults, par, nothing)
 
       # Create the field expression with type and default
@@ -136,7 +140,8 @@ function params(model::Function, globals::Union{Function, Nothing} = nothing; st
   end
   """)
 
-  clipboard(struct_def)
+  # use try/catch as clipboard is not always available (like on CI: ERROR: LoadError: no clipboard command found, please install xsel or xclip or wl-clipboard)
+  try clipboard(struct_def) catch end
   print(struct_def)
   
   return nothing
