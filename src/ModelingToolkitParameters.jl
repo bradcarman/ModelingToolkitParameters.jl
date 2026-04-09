@@ -325,7 +325,6 @@ function cache(model::System, T::Type{<:Params}; parent=model)
         ps = cache(p, fieldtype(T, nm); parent)
         append!(prs, ps)
       else
-        @show p
         setter = setp(parent, p)
         push!(prs, setter)
       end
@@ -364,7 +363,7 @@ end
 
 
 function SciMLBase.remake(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_map::Vector{<:Pair})
-    prob′ = SciMLBase.remake(prob)
+    prob′ = SciMLBase.remake(prob; p = copy(prob.p)) #NOTE: if p is not set to a copy then p maintains the original reference
     update!(prob′, setters, param_map)
     # return SciMLBase.remake(prob′) # Note: using remake a 2nd time could be implemented to provide initialization for solvable parameters, see example below...
     return prob′
