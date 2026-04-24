@@ -7,7 +7,7 @@ using InteractiveUtils: clipboard
 using JuliaFormatter: format_text
 using TOML
 
-export  Params, params, pmap, cache, update!
+export  Params, params, pmap, cache, update!, build_params
 
 """
     Params
@@ -15,6 +15,27 @@ export  Params, params, pmap, cache, update!
 Abstract supertype for all generated parameter structs.
 """
 abstract type Params end
+
+function Base.isequal(x::T1, y::T2) where {T1<:Params, T2<:Params}
+  
+  names1 = fieldnames(T1)
+  names2 = fieldnames(T2)
+  if length(names1) != length(names2)
+    return false
+  end
+  
+  for name in names1
+    if !hasproperty(y, name)
+      return false
+    end
+
+    if !isequal(getproperty(x, name), getproperty(y, name))
+      return false
+    end
+  end
+
+  return true
+end
 
 @static if pkgversion(ModelingToolkit) < v"11"
   # support for the @mtkmodel macro
@@ -148,7 +169,103 @@ function params(model::Function, globals::Union{Function, Nothing} = nothing; st
 end
 
 
+"""
+    build_params(model::Function)
+
+Instantiate the component once via `@named sys = model()` and return the `Params`
+subtype produced by `build_params(sys)`.
+"""
+function build_params(model::Function)
+    @named sys = model()
+    return _build_params_type(sys, _override_map(sys), Symbol[])
+end
+
+
 # (::Type{T})(globals; kwargs...) where T <: Params = T(;globals, kwargs...)
+
+"""
+    build_params(model::System)
+
+Build and return a `Params` subtype (constructor) that mirrors the hierarchy of a
+(possibly compiled) `System`. Each subsystem becomes a field whose type is built
+recursively and defaulted to its own default constructor. Top-level parameters
+become keyword-argument fields defaulted to the system's declared defaults;
+parameters with no declared default become required keyword arguments. Overrides
+specified in the root system's `initial_conditions` (e.g., `source.V => 20`) are
+propagated down to the matching subsystem field. The returned type is generated
+with `Base.@kwdef`, so instances are constructed by keyword, e.g.
+`T(; field1 = value1, ...)`.
+"""
+function build_params(model::System)
+    # Walk up to the root hierarchical system (pre-compile) to recover subsystems
+    root = model
+    while true
+        p = ModelingToolkit.get_parent(root)
+        p === nothing && break
+        root = p
+    end
+    return _build_params_type(root, _override_map(root), Symbol[])
+end
+
+# Build a Dict{Symbol, Any} from a system's defaults/initial_conditions,
+# keyed by the fully namespaced parameter name (e.g. :source₊V).
+function _override_map(sys::System)
+    defs = if isdefined(ModelingToolkit, :initial_conditions)
+        ModelingToolkit.initial_conditions(sys)
+    else
+        ModelingToolkit.defaults(sys)
+    end
+    out = Dict{Symbol, Any}()
+    for (k, v) in defs
+        out[Symbol(ModelingToolkit.getname(k))] = v
+    end
+    return out
+end
+
+function _build_params_type(sys::System, override_map::Dict{Symbol, Any}, prefix::Vector{Symbol})
+    field_exprs = Expr[]
+
+    local_defs = if isdefined(ModelingToolkit, :initial_conditions)
+        ModelingToolkit.initial_conditions(sys)
+    else
+        ModelingToolkit.defaults(sys)
+    end
+
+    # Top-level parameters
+    for par in ModelingToolkit.get_ps(sys)
+        par_name = Symbol(ModelingToolkit.getname(par))
+        par_type = Symbolics.symtype(par)
+        full_name = isempty(prefix) ? par_name : Symbol(join([prefix..., par_name], "₊"))
+        raw_default = get(override_map, full_name) do
+            get(local_defs, par, nothing)
+        end
+        default_val = raw_default === nothing ? nothing : Symbolics.value(raw_default)
+        if default_val isa par_type
+            push!(field_exprs, Expr(:(=), Expr(:(::), par_name, par_type), default_val))
+        else
+            push!(field_exprs, Expr(:(::), par_name, par_type))
+        end
+    end
+
+    # Subsystems, built recursively
+    for sub in ModelingToolkit.get_systems(sys)
+        sub_name = Symbol(ModelingToolkit.getname(sub))
+        SubT = _build_params_type(sub, override_map, [prefix..., sub_name])
+        push!(field_exprs, Expr(:(=), Expr(:(::), sub_name, SubT), Expr(:call, SubT)))
+    end
+
+    type_name = gensym(:BuiltParams)
+    struct_expr = Expr(:struct, true,
+        Expr(:(<:), type_name, :Params),
+        Expr(:block, field_exprs...))
+    kwdef_expr = Expr(:macrocall,
+        Expr(:., :Base, QuoteNode(Symbol("@kwdef"))),
+        LineNumberNode(0, :none),
+        struct_expr)
+    Core.eval(@__MODULE__, kwdef_expr)
+    return Base.invokelatest(getfield, @__MODULE__, type_name)
+end
+
 
 """
     pmap(model::System, pars::Params)
