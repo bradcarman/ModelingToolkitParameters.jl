@@ -4,6 +4,7 @@ version = "0.4.3"
 authors = ["Brad Carman <bradleygcarman@outlook.com>"]
 
 [deps]
+AbstractTrees = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
 JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
 ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
@@ -13,6 +14,7 @@ Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 TOML = "fa267f1f-6049-4f14-aa54-33bafae1ed76"
 
 [compat]
+AbstractTrees = "0.4.5"
 InteractiveUtils = "1.11.0"
 JuliaFormatter = "2.2.0"
 ModelingToolkit = "10,11"

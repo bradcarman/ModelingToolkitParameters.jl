@@ -61,21 +61,16 @@ The additional problems with this pattern are:
  6. parameter maps are not printed with heirarcy and are therefore not easily saved/retrieved to/from file using TOML or JSON
 
 # A Better Way
-ModelingToolkitParameters.jl exports an abstract type `Params` that can be used to build parameter maps using Julia structs.  The `Motor` component can now be defined as follows where a mutable Julia struct `MotorParams` is defined with the same names as the `Motor` component parameters.
+ModelingToolkitParameters.jl exports an abstract type `Params` that can be used to build parameter maps using Julia structs.  The `Motor` component can now be defined as follows with no keyword arguments.  Then we can generate a `Params` type struct object to hold parameter values using the `build_params` function.
 
 ```julia 
 using ModelingToolkitParameters
-@kwdef mutable struct MotorParams <: Params
-    k::Float64 = 0.1
-    r::Float64 = 0.01
-    l::Float64 = 1e-3
-end
 
 @component function Motor(; name)
   pars = @parameters begin
-    k 
-    r
-    l
+    k = 0.1
+    r = 0.01
+    l = 1e-3
   end
   vars = @variables begin
     v(t)
@@ -92,7 +87,10 @@ end
 
   return ODESystem(eqs, t, vars, pars; name)
 end
+
+MotorParams = build_params(Motor)
 ```
+
 
 Now we can build the parameter map by asking for the pair (=>):  `sys::ModelingToolkit.System => p::MotorParams`, for example
 
@@ -132,10 +130,6 @@ Now that our parameters are generated from a Julia struct we have many additiona
 As we move into heirarcal models, we can continue the patern of defining a `struct` that maps to the component, however we now add the parameters and the child systems.  We will build a `MassSpringDamper` component that has the child systems `Mass`, `Spring`, and `Damper`. The Active Suspension model seen here [https://github.com/bradcarman/ActiveSuspensionModel/tree/main/ActiveSuspensionModel.jl](https://github.com/bradcarman/ActiveSuspensionModel/tree/main/ActiveSuspensionModel.jl) defines the simple mass, spring, damper components like
 
 ```julia
-Base.@kwdef mutable struct MassParams <: Params
-    m::Real
-end
-
 @component function Mass(; name)
     pars = @parameters begin
         m
@@ -147,7 +141,6 @@ end
         a(t)
     end
     systems = @named begin
-        globals = Globals()
         flange = MechanicalPort()
     end 
 
@@ -159,17 +152,14 @@ end
 
         D(s) ~ v
         D(v) ~ a
-        m*a ~ f + m*g
+        m*a ~ f
     ]
     return System(eqs, t, vars, pars; name, systems)
 end
 
+MassParams = build_params(Mass)
+
 # ------------------------------------------------
-
-Base.@kwdef mutable struct SpringParams <: Params
-    k::Real
-end
-
 @component function Spring(; name)
     pars = @parameters begin
         k
@@ -192,12 +182,9 @@ end
     return System(eqs, t, vars, pars; name, systems)
 end
 
+SpringParams = build_params(Spring)
+
 # ------------------------------------------------
-
-Base.@kwdef mutable struct DamperParams <: Params
-    d::Real
-end
-
 @component function Damper(; name)
     pars = @parameters begin
         d
@@ -218,6 +205,8 @@ end
     ]
     return System(eqs, t, vars, pars; name, systems)
 end
+
+DamperParams = build_params(Damper)
 ```
 
 Now, we can build a composite component MassSpringDamper
@@ -240,25 +229,16 @@ Now, we can build a composite component MassSpringDamper
 
     return System(eqs, t, [], []; systems, name)
 end
+
+MassSpringDamperParams = build_params(MassSpringDamper)
 ```
 
-This component's parameter struct is then comprised of matching names of the child systems
+This model will require several `MassSpringDampers` representing the wheels, the car and suspension, and the seat and passenger.  We can build a Catalog of these components easily like
 
 ```julia
-Base.@kwdef mutable struct MassSpringDamperParams <: Params
-    # systems
-    damper::DamperParams = DamperParams()
-    body::MassParams = MassParams()
-    spring::SpringParams = SpringParams()
-end
-```
-
-This model will require several `MassSpringDampers` representing the wheels, the car and suspension, and the seat and passanger.  We can build a Catalog of these components easily like
-
-```julia
-const seat = MassSpringDamperParams(;body=MassParams(m=100), spring=SpringParams(k=1000), damper=DamperParams(d=1))
-const car = MassSpringDamperParams(;body=MassParams(m=1000), spring=SpringParams(k=1e4), damper=DamperParams(d=10))
-const wheel = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringParams(k=1e2), damper=DamperParams(d=1e4))
+const seat_pars = MassSpringDamperParams(;body=MassParams(m=100), spring=SpringParams(k=1000), damper=DamperParams(d=1))
+const car_pars = MassSpringDamperParams(;body=MassParams(m=1000), spring=SpringParams(k=1e4), damper=DamperParams(d=10))
+const wheel_pars = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringParams(k=1e2), damper=DamperParams(d=1e4))
 ```
 
 Now when we build the top level model
@@ -280,6 +260,12 @@ Now when we build the top level model
         flip = Gain()
     end
 
+    initial_conditions = [
+        (seat => seat_pars)... 
+        (car_and_suspension => car_pars)...
+        (wheel => wheel_pars)...
+    ]
+
     eqs = [
         
         # mechanical model
@@ -297,27 +283,16 @@ Now when we build the top level model
         connect(flip.output, force.f)        
     ]
 
-    return System(eqs, t, [], []; systems, name)
+    return System(eqs, t, [], []; systems, name, initial_conditions)
 end
 ```
 
 The parameter struct can be easily created from this catalog
 
 ```julia
-Base.@kwdef mutable struct ModelParams <: Params
-    # parameters
-    g::Real = g
-    # systems
-    seat::MassSpringDamperParams = seat
-    car_and_suspension::MassSpringDamperParams = car
-    wheel::MassSpringDamperParams = wheel
-    road_data::RoadParams = RoadParams()
-    pid::ControllerParams = ControllerParams()
-    err::AddParams = subtract
-    set_point::ConstantParams = ConstantParams()
-    flip::GainParams = GainParams(k=-1)
-end
+
 ```
+
 
 # Speed
 As mentioned previously, using the keyword default patern for model parameter setting is not a good way to build several model variations, as this requires fully compiling/simplifying the model from scratch each time.  A better way was shown with ModelingToolkitParameters.jl using `remake` and proving an updated parameter map.  However, this way is still not the fastest.  The most efficient approach is to use `SymbolicIndexingInterface.jl`.  `ModelingToolkitParameters.jl` provides a `cache` function that implements the `SymbolicIndexingInterface.jl` utility to provide a more efficient use of `remake`.  The example below demonstrates this comparison.

@@ -34,4 +34,6 @@ special = ConstantVoltageParams(V=20.0)
 @test special.V == 20.0
 
 @named source = ConstantVoltage()
-source => special
+pmap = source => special
+
+@test isequal(pmap, [source.V => 20.0])

@@ -6,6 +6,7 @@ using SciMLBase
 using InteractiveUtils: clipboard
 using JuliaFormatter: format_text
 using TOML
+using AbstractTrees
 
 export  Params, params, pmap, cache, update!, build_params
 
@@ -170,21 +171,21 @@ end
 
 
 """
-    build_params(model::Function)
+    build_params(model::Function; eval_module::Module = Module())
 
 Instantiate the component once via `@named sys = model()` and return the `Params`
-subtype produced by `build_params(sys)`.
+subtype produced by `build_params(sys; eval_module)`.
 """
-function build_params(model::Function)
+function build_params(model::Function; eval_module::Module = Module())
     @named sys = model()
-    return _build_params_type(sys, _override_map(sys), Symbol[])
+    return _build_params_type(sys, _override_map(sys), Symbol[], eval_module)
 end
 
 
 # (::Type{T})(globals; kwargs...) where T <: Params = T(;globals, kwargs...)
 
 """
-    build_params(model::System)
+    build_params(model::System; eval_module::Module = Module())
 
 Build and return a `Params` subtype (constructor) that mirrors the hierarchy of a
 (possibly compiled) `System`. Each subsystem becomes a field whose type is built
@@ -195,8 +196,15 @@ specified in the root system's `initial_conditions` (e.g., `source.V => 20`) are
 propagated down to the matching subsystem field. The returned type is generated
 with `Base.@kwdef`, so instances are constructed by keyword, e.g.
 `T(; field1 = value1, ...)`.
+
+The generated struct (and any nested sub-structs) are `Core.eval`'d into
+`eval_module`. The default is a fresh anonymous module per call, which is safe but
+opaque. To make the generated type part of *your* package's precompile image, pass
+your module explicitly at the call site:
+
+    MyParams = build_params(MyModel; eval_module = @__MODULE__)
 """
-function build_params(model::System)
+function build_params(model::System; eval_module::Module = Module())
     # Walk up to the root hierarchical system (pre-compile) to recover subsystems
     root = model
     while true
@@ -204,7 +212,7 @@ function build_params(model::System)
         p === nothing && break
         root = p
     end
-    return _build_params_type(root, _override_map(root), Symbol[])
+    return _build_params_type(root, _override_map(root), Symbol[], eval_module)
 end
 
 # Build a Dict{Symbol, Any} from a system's defaults/initial_conditions,
@@ -222,7 +230,7 @@ function _override_map(sys::System)
     return out
 end
 
-function _build_params_type(sys::System, override_map::Dict{Symbol, Any}, prefix::Vector{Symbol})
+function _build_params_type(sys::System, override_map::Dict{Symbol, Any}, prefix::Vector{Symbol}, eval_module::Module)
     field_exprs = Expr[]
 
     local_defs = if isdefined(ModelingToolkit, :initial_conditions)
@@ -247,24 +255,84 @@ function _build_params_type(sys::System, override_map::Dict{Symbol, Any}, prefix
         end
     end
 
-    # Subsystems, built recursively
+    # Subsystems, built recursively (sharing the same eval_module)
     for sub in ModelingToolkit.get_systems(sys)
         sub_name = Symbol(ModelingToolkit.getname(sub))
-        SubT = _build_params_type(sub, override_map, [prefix..., sub_name])
-        push!(field_exprs, Expr(:(=), Expr(:(::), sub_name, SubT), Expr(:call, SubT)))
+        SubT = _build_params_type(sub, override_map, [prefix..., sub_name], eval_module)
+        if !isnothing(SubT)
+          push!(field_exprs, Expr(:(=), Expr(:(::), sub_name, SubT), Expr(:call, SubT)))
+        end
     end
 
-    type_name = gensym(:BuiltParams)
-    struct_expr = Expr(:struct, true,
-        Expr(:(<:), type_name, :Params),
-        Expr(:block, field_exprs...))
-    kwdef_expr = Expr(:macrocall,
-        Expr(:., :Base, QuoteNode(Symbol("@kwdef"))),
-        LineNumberNode(0, :none),
-        struct_expr)
-    Core.eval(@__MODULE__, kwdef_expr)
-    return Base.invokelatest(getfield, @__MODULE__, type_name)
+    if !isempty(field_exprs)
+      base_name = _component_params_name(sys)
+      type_name = gensym(base_name)
+      # Interpolate `Params` as a Type (not as the symbol :Params) so the generated
+      # code does not depend on `Params` being in scope wherever the struct is eval'd.
+      struct_expr = Expr(:struct, true,
+          Expr(:(<:), type_name, Params),
+          Expr(:block, field_exprs...))
+      kwdef_expr = Expr(:macrocall,
+          Expr(:., :Base, QuoteNode(Symbol("@kwdef"))),
+          LineNumberNode(0, :none),
+          struct_expr)
+      Core.eval(eval_module, kwdef_expr)
+
+      return Base.invokelatest(getfield, eval_module, type_name)
+    else
+      return nothing
+    end
 end
+
+# Derive a human-readable base name for the generated struct from the
+# originating component's function name, e.g. RCModel -> :RCModelParams.
+# Falls back to :BuiltParams if the component type is unavailable.
+function _component_params_name(sys::System)
+    try
+        cname = String(ModelingToolkit.get_component_type(sys).name)
+        return Symbol(cname * "Params")
+    catch
+        return :BuiltParams
+    end
+end
+
+# Strip the gensym decoration `##Name#N` to recover `Name` for display.
+function _display_typename(::Type{T}) where {T<:Params}
+    s = String(nameof(T))
+    m = match(r"^##(.+)#\d+$", s)
+    return m === nothing ? s : m.captures[1]
+end
+
+"""
+    ParamsNode(name, value)
+
+Internal wrapper used by the `AbstractTrees` integration so each field carries the
+name it had on its parent, enabling pretty tree printouts of `Params` instances.
+"""
+struct ParamsNode
+    name::Symbol
+    value::Any
+end
+
+AbstractTrees.children(x::Params) =
+    [ParamsNode(n, getproperty(x, n)) for n in propertynames(x)]
+
+AbstractTrees.children(n::ParamsNode) =
+    n.value isa Params ? AbstractTrees.children(n.value) : ()
+
+AbstractTrees.printnode(io::IO, x::T) where {T<:Params} = 
+    print(io, _display_typename(T))
+
+function AbstractTrees.printnode(io::IO, n::ParamsNode)
+    if n.value isa Params
+        print(io, n.name)
+    else
+        print(io, n.name, ": ", n.value)
+    end
+end
+
+Base.show(io::IO, ::MIME"text/plain", x::Params) =
+    AbstractTrees.print_tree(io, x)
 
 
 """

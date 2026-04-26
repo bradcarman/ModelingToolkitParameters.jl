@@ -1,0 +1,22 @@
+name = "ActiveSuspensionModel"
+uuid = "d21327f5-f906-4840-9bb0-2687f0591413"
+version = "0.2.2"
+authors = ["Brad Carman <bradleygcarman@outlook.com>"]
+
+[deps]
+ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
+ModelingToolkitParameters = "d96c1b6d-73fa-42cf-8af9-45e6140feccb"
+OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
+PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
+RuntimeGeneratedFunctions = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
+
+[compat]
+OrdinaryDiffEq = "6.111.0"
+
+[extras]
+CairoMakie = "13f3f980-e62b-5c42-98c6-ff1f3baf88f0"
+GLMakie = "e9467ef8-e4e7-5192-8a1a-b1aee30e663a"
+Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
+
+[targets]
+test = ["Test", "CairoMakie", "GLMakie"]
