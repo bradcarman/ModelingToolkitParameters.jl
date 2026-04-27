@@ -23,15 +23,15 @@ end
 # -------------------------------------------------------------------
 const g = -9.807
 
-@component function Globals(; name)
-  @parameters begin
-    g=g
-  end
+# @component function Globals(; name)
+#   @parameters begin
+#     g=g
+#   end
 
-  g = GlobalScope(g)
+#   g = GlobalScope(g)
 
-  return System(Equation[], t, [], [g]; name)
-end
+#   return System(Equation[], t, [], [g]; name)
+# end
 
 @component function Add(; name)
     pars = @parameters begin
@@ -57,7 +57,7 @@ const subtract = AddParams(k1=1,k2=-1)
 
 @component function Constant(; name)
     pars = @parameters begin
-        k
+        k=0
     end
     systems = @named begin
         output = RealOutput()
@@ -163,11 +163,11 @@ end
         a(t)
     end
     systems = @named begin
-        globals = Globals()
         flange = MechanicalPort()
     end 
 
-    @unpack g = globals
+    @parameters g
+    g = GlobalScope(g)
     
     eqs = [
         s ~ flange.x

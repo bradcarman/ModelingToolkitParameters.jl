@@ -143,7 +143,8 @@ const wheel_pars = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringP
         (seat => seat_pars)...
         (car_and_suspension => car_pars)...
         (wheel => wheel_pars)...
-        (flip => pars)...
+        (err => subtract)...
+        (flip => flip_pars)...
     ]
 
     
@@ -185,67 +186,67 @@ const wheel_pars = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringP
 end
 
 
-Base.@kwdef mutable struct InverseModelParams <: Params
-    # parameters
-    g::Real = g
-    # systems
-    seat::MassSpringDamperParams = seat
-    car_and_suspension::MassSpringDamperParams = car
-    wheel::MassSpringDamperParams = wheel
-    road_data::RoadParams = RoadParams()
-    set_point::ConstantParams = ConstantParams()
-    flip::GainParams = GainParams()
-end
+# Base.@kwdef mutable struct InverseModelParams <: Params
+#     # parameters
+#     g::Real = g
+#     # systems
+#     seat::MassSpringDamperParams = seat
+#     car_and_suspension::MassSpringDamperParams = car
+#     wheel::MassSpringDamperParams = wheel
+#     road_data::RoadParams = RoadParams()
+#     set_point::ConstantParams = ConstantParams()
+#     flip::GainParams = GainParams()
+# end
 
-@component function InverseModel(; name)
+# @component function InverseModel(; name)
 
-    systems = @named begin
-        seat = MassSpringDamper()
-        car_and_suspension = MassSpringDamper()
-        wheel = MassSpringDamper()
-        road_data = Road()
-        road = Position()
-        force = Force()
-        set_point = Constant()
-        seat_pos = PositionInput()
-        flip = Gain()
+#     systems = @named begin
+#         seat = MassSpringDamper()
+#         car_and_suspension = MassSpringDamper()
+#         wheel = MassSpringDamper()
+#         road_data = Road()
+#         road = Position()
+#         force = Force()
+#         set_point = Constant()
+#         seat_pos = PositionInput()
+#         flip = Gain()
 
-        unknown = Unknown()
-    end
+#         unknown = Unknown()
+#     end
 
-    eqs = [
+#     eqs = [
         
-        # mechanical model
-        connect(road.s, road_data.output)
-        connect(road.flange, wheel.port_sd)
-        connect(wheel.port_m, car_and_suspension.port_sd)
-        connect(car_and_suspension.port_m, seat.port_sd, force.flange_a)
-        connect(seat.port_m, force.flange_b, seat_pos.flange)
+#         # mechanical model
+#         connect(road.s, road_data.output)
+#         connect(road.flange, wheel.port_sd)
+#         connect(wheel.port_m, car_and_suspension.port_sd)
+#         connect(car_and_suspension.port_m, seat.port_sd, force.flange_a)
+#         connect(seat.port_m, force.flange_b, seat_pos.flange)
         
-        # controller        
-        connect(set_point.output, seat_pos.input)
-        connect(unknown.output, flip.input)
-        connect(flip.output, force.f)        
-    ]
+#         # controller        
+#         connect(set_point.output, seat_pos.input)
+#         connect(unknown.output, flip.input)
+#         connect(flip.output, force.f)        
+#     ]
 
-    initialization_eqs = [
-        wheel.body.s ~ 0.5
-        car_and_suspension.body.s ~ 1.0
-        # seat.body.s ~ 1.5
+#     initialization_eqs = [
+#         wheel.body.s ~ 0.5
+#         car_and_suspension.body.s ~ 1.0
+#         # seat.body.s ~ 1.5
 
-        wheel.body.v ~ 0
-        car_and_suspension.body.v ~ 0
-        # seat.body.v ~ 0
+#         wheel.body.v ~ 0
+#         car_and_suspension.body.v ~ 0
+#         # seat.body.v ~ 0
 
-        wheel.body.a ~ 0
-        car_and_suspension.body.a ~ 0
-        # seat.body.a ~ 0
+#         wheel.body.a ~ 0
+#         car_and_suspension.body.a ~ 0
+#         # seat.body.a ~ 0
 
-        force.f.u ~ 0
-    ]
+#         force.f.u ~ 0
+#     ]
 
-    return System(eqs, t, [], []; systems, name, initialization_eqs)
-end
+#     return System(eqs, t, [], []; systems, name, initialization_eqs)
+# end
 
 
 

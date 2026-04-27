@@ -9,6 +9,7 @@ using TOML
 using AbstractTrees
 
 export  Params, params, pmap, cache, update!, build_params
+export ModelParams, get_parent, get_defs
 
 """
     Params
@@ -16,6 +17,115 @@ export  Params, params, pmap, cache, update!, build_params
 Abstract supertype for all generated parameter structs.
 """
 abstract type Params end
+
+struct ModelParams <: Params
+    parent::System
+    defs::Dict
+end
+
+function ModelParams(Model::Function)
+  @named sys = Model()
+  return ModelParams(sys)
+end
+
+ModelParams(sys::System) = ModelParams(ModelingToolkit.toggle_namespacing(sys, false), ModelingToolkit.initial_conditions(sys))
+get_parent(obj::ModelParams) = getfield(obj, :parent)
+get_defs(obj::ModelParams) = getfield(obj, :defs)
+
+function Base.getproperty(x::ModelParams, var::Symbol)
+    parent = get_parent(x)
+    defs = get_defs(x)
+
+    sym = getproperty(parent, var)
+
+    if typeof(sym) <: System
+      return ModelParams(sym, defs)
+    else
+      return Symbolics.value(defs[sym])
+    end
+end
+
+function Base.setproperty!(x::ModelParams, var::Symbol, val)
+    parent = get_parent(x)
+    defs = get_defs(x)
+
+    sym = getproperty(parent, var)
+
+    defs[sym] = val
+
+    return nothing
+end
+
+function Base.fieldnames(x::ModelParams)
+  sys = get_parent(x)
+
+  names = Symbol[]
+
+  for par in ModelingToolkit.get_ps(sys)
+    
+
+    scope = ModelingToolkit.getmetadata(par, ModelingToolkit.SymScope, ModelingToolkit.LocalScope())
+    scope isa ModelingToolkit.GlobalScope && continue
+
+    if !ModelingToolkit.isinitial(par)
+      push!(names, Symbol(ModelingToolkit.getname(par)))
+    end
+  end
+
+  for sub in ModelingToolkit.get_systems(sys)
+    ps = ModelingToolkit.get_ps(sub)
+    ss = ModelingToolkit.get_systems(sub)
+    name = Symbol(ModelingToolkit.getname(sub))
+    if !isempty(ps) | !isempty(ss)
+      push!(names, name)
+    end
+  end
+
+  return names
+end
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 function Base.isequal(x::T1, y::T2) where {T1<:Params, T2<:Params}
   
@@ -176,9 +286,9 @@ end
 Instantiate the component once via `@named sys = model()` and return the `Params`
 subtype produced by `build_params(sys; eval_module)`.
 """
-function build_params(model::Function; eval_module::Module = Module())
+function build_params(model::Function; eval_module::Module = Module(), globals=Pair[])
     @named sys = model()
-    return _build_params_type(sys, _override_map(sys), Symbol[], eval_module)
+    return _build_params_type(sys, _override_map(sys), Symbol[], eval_module, globals)
 end
 
 
@@ -204,7 +314,7 @@ your module explicitly at the call site:
 
     MyParams = build_params(MyModel; eval_module = @__MODULE__)
 """
-function build_params(model::System; eval_module::Module = Module())
+function build_params(model::System; eval_module::Module = Module(), globals=Pair[])
     # Walk up to the root hierarchical system (pre-compile) to recover subsystems
     root = model
     while true
@@ -212,7 +322,7 @@ function build_params(model::System; eval_module::Module = Module())
         p === nothing && break
         root = p
     end
-    return _build_params_type(root, _override_map(root), Symbol[], eval_module)
+    return _build_params_type(root, _override_map(root), Symbol[], eval_module, globals)
 end
 
 # Build a Dict{Symbol, Any} from a system's defaults/initial_conditions,
@@ -230,8 +340,30 @@ function _override_map(sys::System)
     return out
 end
 
-function _build_params_type(sys::System, override_map::Dict{Symbol, Any}, prefix::Vector{Symbol}, eval_module::Module)
+function _build_params_type(sys::System, override_map::Dict{Symbol, Any}, prefix::Vector{Symbol}, eval_module::Module, globals=Pair[])
+    # Reuse an already-built `Params` subtype for this component within
+    # `eval_module`. This guarantees a single canonical type per component across
+    # all calls (including recursive ones), so an instance built via the
+    # standalone `DamperParams` is the same type the parent struct's
+    # `damper::DamperParams` field expects. The cache key is a hidden binding
+    # rather than the public-facing name (e.g. `:DamperParams`) to sidestep
+    # Julia's top-level global pre-declaration: `DamperParams = build_params(...)`
+    # reserves `DamperParams` as a non-const global before the RHS runs, which
+    # prevents `Core.eval` from defining a struct under that exact name.
+    base_name = _component_params_name(sys)
+    cache_name = base_name === :BuiltParams ?
+        nothing : Symbol("__bp_cache_", base_name, "__")
+    if cache_name !== nothing && isdefined(eval_module, cache_name)
+        existing = getfield(eval_module, cache_name)
+        if existing isa Type && existing <: Params
+            return existing
+        end
+    end
+
     field_exprs = Expr[]
+    for (var,val) in globals
+      push!(field_exprs, Expr(:(=), Expr(:(::), var, typeof(val)), val))
+    end
 
     local_defs = if isdefined(ModelingToolkit, :initial_conditions)
         ModelingToolkit.initial_conditions(sys)
@@ -241,14 +373,34 @@ function _build_params_type(sys::System, override_map::Dict{Symbol, Any}, prefix
 
     # Top-level parameters
     for par in ModelingToolkit.get_ps(sys)
+       @show par
+        # Skip globally scoped parameters; they belong to the outer scope and would
+        # collide if added per-component.
+        scope = ModelingToolkit.getmetadata(par, ModelingToolkit.SymScope, ModelingToolkit.LocalScope())
+        scope isa ModelingToolkit.GlobalScope && continue
+
         par_name = Symbol(ModelingToolkit.getname(par))
         par_type = Symbolics.symtype(par)
         full_name = isempty(prefix) ? par_name : Symbol(join([prefix..., par_name], "₊"))
-        raw_default = get(override_map, full_name) do
-            get(local_defs, par, nothing)
+        raw_default = if haskey(override_map, full_name)
+            override_map[full_name]
+        elseif haskey(local_defs, par)
+            local_defs[par]
+        elseif ModelingToolkit.hasdefault(par)
+            # `missing` defaults aren't stored in `initial_conditions`, but are
+            # recoverable via `getdefault`.
+            ModelingToolkit.getdefault(par)
+        else
+            nothing
         end
-        default_val = raw_default === nothing ? nothing : Symbolics.value(raw_default)
-        if default_val isa par_type
+        default_val = raw_default === nothing || raw_default === missing ?
+            raw_default : Symbolics.value(raw_default)
+
+        @show par_name par_type full_name raw_default default_val
+        if default_val === missing
+            field_type = Union{Missing, par_type}
+            push!(field_exprs, Expr(:(=), Expr(:(::), par_name, field_type), missing))
+        elseif default_val isa par_type
             push!(field_exprs, Expr(:(=), Expr(:(::), par_name, par_type), default_val))
         else
             push!(field_exprs, Expr(:(::), par_name, par_type))
@@ -265,7 +417,6 @@ function _build_params_type(sys::System, override_map::Dict{Symbol, Any}, prefix
     end
 
     if !isempty(field_exprs)
-      base_name = _component_params_name(sys)
       type_name = gensym(base_name)
       # Interpolate `Params` as a Type (not as the symbol :Params) so the generated
       # code does not depend on `Params` being in scope wherever the struct is eval'd.
@@ -277,8 +428,15 @@ function _build_params_type(sys::System, override_map::Dict{Symbol, Any}, prefix
           LineNumberNode(0, :none),
           struct_expr)
       Core.eval(eval_module, kwdef_expr)
+      T = Base.invokelatest(getfield, eval_module, type_name)
 
-      return Base.invokelatest(getfield, eval_module, type_name)
+      # Register the built type under the hidden cache binding so subsequent
+      # calls for the same component (including recursive ones) reuse it.
+      if cache_name !== nothing
+          Core.eval(eval_module, Expr(:const, Expr(:(=), cache_name, T)))
+      end
+
+      return T
     else
       return nothing
     end
@@ -351,7 +509,7 @@ Return a parameter map suitable for passing to `ODEProblem`, `update!` or `SciML
 function Base.Pair(model::System, pars::T) where T <: Params  
 
   prs = Pair[]
-  for nm in fieldnames(T)
+  for nm in fieldnames()
     if hasproperty(model, nm)
       x = getproperty(model,nm) => getproperty(pars,nm)
       if x isa Vector
@@ -366,6 +524,22 @@ function Base.Pair(model::System, pars::T) where T <: Params
 end
 
 
+function Base.Pair(model::System, pars::ModelParams)
+
+  prs = Pair[]
+  for nm in fieldnames(pars)
+    if hasproperty(model, nm)
+      x = getproperty(model,nm) => getproperty(pars,nm)
+      if x isa Vector
+        append!(prs, x)
+      else
+        push!(prs, x)
+      end
+    end
+  end
+
+  return prs
+end
 
 
 
@@ -388,6 +562,27 @@ function Base.Dict(x::T) where T <: Params
 
   return Dict(children)
 end
+
+
+function Base.Dict(x::ModelParams)
+
+  children = Pair[] 
+
+  for nm in fieldnames(x)
+
+      prop = getproperty(x, nm)
+      if typeof(prop) <: ModelParams
+        val = Dict(prop)
+      else
+        val = prop
+      end
+      push!(children, nm => val)
+    
+  end
+
+  return Dict(children)
+end
+
 
 function Base.setproperty!(x::T, dict::Dict) where T <: Params
     for (key,value) in dict

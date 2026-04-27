@@ -3,6 +3,10 @@ using ModelingToolkit: D_nounits as D, t_nounits as t
 using ModelingToolkitParameters
 using Test
 
+
+
+
+
 @connector function Pin(;name)
     vars = @variables begin
         v(t)
@@ -23,10 +27,6 @@ end
 end
 
 
-# Base.@kwdef mutable struct ResistorParams <: Params
-#     R::Real = 1.0
-# end
-
 @component function Resistor(;name)
     systems = @named begin
         p = Pin()
@@ -41,11 +41,6 @@ end
     ]        
     return System(eqs, t, [], pars; name, systems)
 end
-
-
-# Base.@kwdef mutable struct CapacitorParams <: Params
-#     C::Real = 0.1
-# end
 
 @component function Capacitor(;name)
     systems = @named begin
@@ -67,10 +62,6 @@ end
 end
 
 
-# Base.@kwdef mutable struct ConstantVoltageParams <: Params
-#     V::Real = 10.0
-# end
-
 @component function ConstantVoltage(;name)
     systems = @named begin
         p = Pin()
@@ -86,8 +77,9 @@ end
     return System(eqs, t, [], pars; name, systems)
 end
 
-ConstantVoltageParams = build_params(ConstantVoltage)
-special = ConstantVoltageParams(V=20)
+special = ModelParams(ConstantVoltage);
+special.V = 20.0
+
 
 @component function RCModel(use_resistor=true; name)
     systems = @named begin
@@ -124,10 +116,10 @@ end
 
 
 #test case use_resistor = true
-@mtkcompile rc_model1 = RCModel(true)
+@named rc_model1 = RCModel(true)
 defs = ModelingToolkit.initial_conditions(rc_model1)
 
-
-RCModel1Params = build_params(rc_model1)
-rc_model1_params = RCModel1Params()
+rc_model1_params = ModelParams(rc_model1);
 @test rc_model1_params.source.V == special.V
+
+Dict(rc_model1_params)
