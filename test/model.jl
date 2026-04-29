@@ -1,5 +1,8 @@
 using ModelingToolkit
 using ModelingToolkit: D_nounits as D, t_nounits as t
+using ModelingToolkitParameters
+using Test
+
 
 @connector function Pin(;name)
     vars = @variables begin
@@ -21,17 +24,13 @@ end
 end
 
 
-Base.@kwdef mutable struct ResistorParams <: Params
-    R::Real = 1.0
-end
-
 @component function Resistor(;name)
     systems = @named begin
         p = Pin()
         n = Pin()
     end
     pars = @parameters begin
-        R
+        R=1.0, [bounds=(0, Inf)]
     end
     eqs = [
         p.v - n.v ~ p.i * R
@@ -41,17 +40,13 @@ end
 end
 
 
-Base.@kwdef mutable struct CapacitorParams <: Params
-    C::Real = 0.1
-end
-
 @component function Capacitor(;name)
     systems = @named begin
         p = Pin()
         n = Pin()
     end
     pars = @parameters begin
-        C
+        C=0.1
     end
     vars = @variables begin
         v(t)=0
@@ -65,45 +60,95 @@ end
 end
 
 
-Base.@kwdef mutable struct ConstantVoltageParams <: Params
-    V::Real = 10.0
-end
-
 @component function ConstantVoltage(;name)
     systems = @named begin
         p = Pin()
         n = Pin()
     end
     pars = @parameters begin
-        V
+        V = 10.0
+        initial_voltage = missing, [guess=0]
     end
     eqs = [
-        V ~ p.v - n.v
+        V ~ p.v - n.v + initial_voltage
         0 ~ p.i + n.i
     ]        
     return System(eqs, t, [], pars; name, systems)
 end
 
+special = ModelParams(ConstantVoltage; V = 20)
 
-
-@kwdef mutable struct RCModelParams <: Params
-    resistor::ResistorParams = ResistorParams()
-    capacitor::CapacitorParams = CapacitorParams()
-    source::ConstantVoltageParams = ConstantVoltageParams()
-end
-
-@component function RCModel(; name)
+@component function RCModel(use_resistor=true; name)
     systems = @named begin
-        resistor = Resistor()
         capacitor = Capacitor()
         source = ConstantVoltage()
         ground = Ground()
     end
-    eqs = [
-        connect(source.p, resistor.p)
-        connect(resistor.n, capacitor.p)
-        connect(capacitor.n, source.n)
-        connect(capacitor.n, ground.g)
+
+    initial_conditions = [
+        (source => special)...
     ]
-    return System(eqs, t, [], []; name, systems)
+
+    if use_resistor
+        @named resistor = Resistor()
+        push!(systems, resistor)
+    end
+    
+    eqs = if use_resistor
+        [
+            connect(source.p, resistor.p)
+            connect(resistor.n, capacitor.p)
+            connect(capacitor.n, source.n)
+            connect(capacitor.n, ground.g)
+        ]
+    else
+        [
+            connect(source.p, capacitor.p)
+            connect(capacitor.n, source.n)
+            connect(capacitor.n, ground.g)
+        ]
+    end
+    return System(eqs, t, [], []; name, systems, initial_conditions)
 end
+
+
+#test case use_resistor = true
+@named rc_model1 = RCModel(true)
+defs = ModelingToolkit.initial_conditions(rc_model1)
+
+
+rc_model1_params = ModelParams(rc_model1);
+@test rc_model1_params.source.V == special.V
+@test_throws ErrorException  rc_model1_params.resistor.R = -1
+@test rc_model1_params.resistor.R == 1.0
+
+
+@named rc_model2 = RCModel(false)
+defs = ModelingToolkit.initial_conditions(rc_model1)
+
+rc_model2_params = ModelParams(rc_model2)
+@test rc_model2_params.source.V == special.V
+
+rc_model1 => rc_model1_params
+rc_model2 => rc_model2_params
+
+
+rc_model1 => rc_model2_params
+rc_model2 => rc_model1_params
+
+
+cap = rc_model1_params.capacitor
+cap.C = 2.0
+
+rc_model2_params.capacitor = cap
+
+@test rc_model2_params.capacitor.C == 2.0
+
+
+rc_model3_params = ModelParams(RCModel; capacitor=ModelParams(Capacitor; C=3.0))
+
+rc_model1 => rc_model3_params
+
+
+sys = mtkcompile(rc_model1)
+@test_throws AssertionError ModelParams(sys)
