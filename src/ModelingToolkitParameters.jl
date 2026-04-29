@@ -6,174 +6,277 @@ using SciMLBase
 using InteractiveUtils: clipboard
 using JuliaFormatter: format_text
 using TOML
+using AbstractTrees
 
-export  Params, params, pmap, cache, update!
+export ModelParams, get_parent, get_defs, pmap, cache, update!, @model_params, save_parameters, load_parameters
 
 """
-    Params
+    ModelParams(Model::Function; kwargs...)
+    ModelParams(sys::System;     kwargs...)
 
-Abstract supertype for all generated parameter structs.
+A mutable, hierarchical parameter container for a ModelingToolkit `System`. Each
+field mirrors a parameter or sub-system of the underlying model and can be read or
+mutated with normal `getproperty`/`setproperty!` syntax (e.g. `pars.resistor.R = 2`).
+Bounds attached to parameters via `@parameters X, [bounds=(lo, hi)]` are enforced
+on assignment.
+
+The system must NOT be structurally simplified — construct it with `@named`
+(`@mtkcompile`/`@mtkbuild` will throw). Initial values come from
+`ModelingToolkit.initial_conditions(sys)`. Any keyword arguments are applied as
+parameter overrides after construction.
+
+Use [`pmap`](@ref) (or `model => pars`) to convert a `ModelParams` into the
+parameter map expected by `ODEProblem`/`SciMLBase.remake`, and [`cache`](@ref) +
+[`update!`](@ref) for fast in-place updates.
+
+# Examples
+```julia
+pars = ModelParams(RCModel)
+pars.resistor.R = 2.0
+
+pars = ModelParams(ConstantVoltage; V = 20)
+```
 """
-abstract type Params end
+struct ModelParams
+    parent::System
+    defs::Dict
+end
 
-@static if pkgversion(ModelingToolkit) < v"11"
-  # support for the @mtkmodel macro
-  params(model::ModelingToolkit.Model, args...) = params(model.f, args...; stripname=true)
+function ModelParams(Model::Function; kwargs...)
+  @named sys = Model()
+  return ModelParams(sys; kwargs...)
+end
+
+function ModelParams(sys::System; kwargs...)
+  #NOTE: sys must be not structuraly simplified because we need access to the sub-systems
+  @assert !ModelingToolkit.iscomplete(sys) "`ModelParams` cannot accept a structualy simplified system, please use @named only"
+  m = ModelParams(ModelingToolkit.toggle_namespacing(sys, false), ModelingToolkit.initial_conditions(sys))
+  
+  for (key, value) in kwargs
+    setproperty!(m, key, value)
+  end
+  
+  return m
 end
 
 """
-    params(model::Function, globals=nothing; stripname=false, parent=parentmodule(model), defaults=NamedTuple())
+    get_parent(p::ModelParams) -> System
 
-Inspect a ModelingToolkit component function and generate the corresponding `Params` struct
-definition. The struct definition is printed to the REPL and copied to the clipboard.
-`globals` is an optional second component function whose parameters are appended as
-top-level fields. `defaults` can be used to pass keyword arguments when instantiating
-the component for introspection.  Use `parent` to specify the module where child `System` 
-definitions can be found if located in a different module from `model`.
+Return the underlying (un-simplified) `System` that backs `p`. Use this instead of
+`p.parent`, since `getproperty` on a `ModelParams` looks up parameters by name.
 """
-function params(model::Function, globals::Union{Function, Nothing} = nothing; stripname=false, parent::Module=parentmodule(model), defaults=NamedTuple())
+get_parent(obj::ModelParams) = getfield(obj, :parent)
 
-  name = string(model)
-  if stripname
-    name = name[3:end-2]
-  end
+"""
+    get_defs(p::ModelParams) -> Dict
 
-  # Generate the struct name: FunctionName -> FunctionNameParams
-  struct_name = Symbol(name * "Params")
+Return the internal `symbolic_parameter => value` dictionary holding the current
+overrides for `p`. Mutating the returned dict mutates `p`.
+"""
+get_defs(obj::ModelParams) = getfield(obj, :defs)
 
-  # The strategy: We'll generate code that:
-  # 1. Defines the original function
-  # 2. Creates a temporary instance to extract parameters
-  # 3. Generates the struct based on those parameters
+function Base.getproperty(x::ModelParams, var::Symbol)
+    parent = get_parent(x)
+    defs = get_defs(x)
 
-  # Create a temporary instance with a dummy name
-  @named temp_instance = model(; defaults...)
+    sym = getproperty(parent, var)
 
-  # Get the parameters from the system
-  pars = ModelingToolkit.get_ps(temp_instance)
-  systems = ModelingToolkit.get_systems(temp_instance)
-  
-
-  if !isnothing(globals)
-    @named g = globals()
-    gs = ModelingToolkit.get_ps(g)
-    append!(pars, gs)
-  end
-    
-  # Build the struct fields
-  exprs = String[]
-
-  if !isempty(pars)
-    push!(exprs, "# parameters")
-  end
-
-  for par in pars
-      # Get the parameter name (without the system prefix)
-      par_name = Symbol(ModelingToolkit.getname(par))
-
-      # Get the parameter type
-      par_type = Symbolics.symtype(par)
-
-      # Get default value if available
-      defaults = if isdefined(ModelingToolkit, :initial_conditions) # only defined on MTK v11, not v10 and below
-          ModelingToolkit.initial_conditions(temp_instance)
-      else
-          ModelingToolkit.defaults(temp_instance)
-      end
-      default_val = get(defaults, par, nothing)
-
-      # Create the field expression with type and default
-
-      if default_val !== nothing
-          push!(exprs, "$par_name::$par_type = $default_val")
-      else
-          # If no default, just use type annotation
-          push!(exprs, "$par_name::$par_type")
-      end
-  end
-
-
-  add_comment = true
-  for system in systems
-      # Get the parameter name (without the system prefix)
-      system_name = Symbol(ModelingToolkit.getname(system))
-      system_type = ModelingToolkit.get_component_type(system).name
-      struct_type = Symbol(string(system_type) * "Params")
-
-      if isdefined(parent, struct_type)
-        if add_comment
-          push!(exprs, "# systems")
-          add_comment = false
-        end
-
-        names = fieldnames(getproperty(parent, struct_type))
-        defs = if isdefined(ModelingToolkit, :initial_conditions) # only defined on MTK v11, not v10 and below
-            ModelingToolkit.initial_conditions(system)
+    if typeof(sym) <: System
+      return ModelParams(sym, defs)
+    else
+      if !haskey(defs, sym)
+        if ModelingToolkit.hasdefault(sym)
+          return ModelingToolkit.getdefault(sym)
         else
-            ModelingToolkit.defaults(system)
+          return nothing
         end
-        sub_pars = ModelingToolkit.get_ps(system)
-        values = map(names) do nm
-          par_idx = findfirst(p -> Symbol(ModelingToolkit.getname(p)) == nm, sub_pars)
-          par_idx !== nothing ? get(defs, sub_pars[par_idx], nothing) : nothing
-        end
-
-        args = String[]
-        for (n,v) in zip(names, values)
-          if !isnothing(v)
-            push!(args, "$n = $v")
-          end
-        end
-
-        push!(exprs, "$system_name::$struct_type = $struct_type($(join(args, ",")))")
       else
-        @warn "$system_name::$struct_type definition not available in $parent, skipping"
+        return Symbolics.value(defs[sym])
       end
-  end
+    end
+end
 
+function Base.setproperty!(x::ModelParams, var::Symbol, val)
+    parent = get_parent(x)
+    defs = get_defs(x)
 
+    sym = getproperty(parent, var)
 
-  # Generate the struct definition
-  struct_def = format_text("""
-  Base.@kwdef mutable struct $struct_name <: Params
-    $(join(exprs, "\n"))
-  end
-  """)
+    if ModelingToolkit.isparameter(sym)
+      if ModelingToolkit.hasbounds(sym)
+        bounds = ModelingToolkit.getbounds(sym)
+        
+        if val < bounds[1]
+          error("exceeded minimum bound $(bounds[1])")
+        end
 
-  # use try/catch as clipboard is not always available (like on CI: ERROR: LoadError: no clipboard command found, please install xsel or xclip or wl-clipboard)
-  try clipboard(struct_def) catch end
-  print(struct_def)
-  
-  return nothing
+        if val > bounds[2]
+          error("exceeded maxiumu bound $(bounds[2])")
+        end
+      end
+
+      defs[sym] = val
+    end
+
+    if (sym isa System) & (val isa ModelParams)
+
+      child = getproperty(x, var)
+      for nm in fieldnames(child)
+        setproperty!(child, nm, getproperty(val, nm))
+      end
+
+    end
+
+    return nothing
 end
 
 
-# (::Type{T})(globals; kwargs...) where T <: Params = T(;globals, kwargs...)
+function has_nested_parameter(sys::System)
+
+  ps = ModelingToolkit.get_ps(sys)
+  if !isempty(ps)
+    return true
+  end
+
+  ss = ModelingToolkit.get_systems(sys)
+
+  if !isempty(ss)
+    return any([has_nested_parameter(sub) for sub in ss])
+  else
+    return false
+  end
+
+end
+
+
+
+function Base.fieldnames(x::ModelParams)
+  sys = get_parent(x)
+  # defs = get_defs(x)
+
+  names = Symbol[]
+
+  for par in ModelingToolkit.get_ps(sys)
+    # scope = ModelingToolkit.getmetadata(par, ModelingToolkit.SymScope, ModelingToolkit.LocalScope())
+    # scope isa ModelingToolkit.GlobalScope && continue
+
+    if !ModelingToolkit.isinitial(par) #avoids Initial(x) "parameters"
+      push!(names, Symbol(ModelingToolkit.getname(par)))
+    end
+  end
+
+  for sub in ModelingToolkit.get_systems(sys)
+    if has_nested_parameter(sub)
+      push!(names, Symbol(ModelingToolkit.getname(sub)))
+    end
+  end
+
+  return names
+end
+
+
+
+function Base.isequal(x::ModelParams, y::ModelParams)
+  
+  names1 = fieldnames(x)
+  names2 = fieldnames(y)
+  if length(names1) != length(names2)
+    return false
+  end
+  
+  for name in names1
+    if !hasproperty(y, name)
+      return false
+    end
+
+    if !isequal(getproperty(x, name), getproperty(y, name))
+      return false
+    end
+  end
+
+  return true
+end
+
 
 """
-    pmap(model::System, pars::Params)
+    ParamsNode(name, value)
 
-Return a parameter map suitable for passing to `ODEProblem`, `update!` or `SciMLBase.remake`.
+Internal wrapper used by the `AbstractTrees` integration so each field carries the
+name it had on its parent, enabling pretty tree printouts of `ModelParams` instances.
 """
-pmap(model::System, pars::T) where T <: Params  = model => pars
+struct ParamsNode
+    name::Symbol
+    value::Any
+end
 
+AbstractTrees.children(x::ModelParams) =
+    [ParamsNode(n, getproperty(x, n)) for n in fieldnames(x)]
+
+AbstractTrees.children(n::ParamsNode) =
+    n.value isa ModelParams ? AbstractTrees.children(n.value) : ()
+
+function AbstractTrees.printnode(io::IO, x::ModelParams) 
+  parent =  get_parent(x)
+  component_type = ModelingToolkit.get_component_type(parent)
+  print(io, component_type.name)
+end
+
+function AbstractTrees.printnode(io::IO, n::ParamsNode)
+    if n.value isa ModelParams
+        print(io, n.name)
+    else
+        print(io, n.name, ": ", n.value)
+    end
+end
+
+Base.show(io::IO, ::MIME"text/plain", x::ModelParams) =
+    AbstractTrees.print_tree(io, x)
+
+PMapDict = Dict{SymbolicUtils.BasicSymbolicImpl.var"typeof(BasicSymbolicImpl)"{SymReal}, SymbolicUtils.BasicSymbolicImpl.var"typeof(BasicSymbolicImpl)"{SymReal}}
 
 """
-    Pair(model::System, pars::T) where T <: Params  
+    pmap(model::System, pars::ModelParams) -> Dict
 
-Return a parameter map suitable for passing to `ODEProblem`, `update!` or `SciMLBase.remake`.
+Build a `Dict{symbolic_parameter, value}` keyed by the symbolic parameters of
+`model`. This is the form accepted by [`update!`](@ref) and the cache-aware
+`SciMLBase.remake(prob, setters, param_dict)` method.
+
+For the flat `Vector{Pair}` form expected by `ODEProblem` and the standard
+`SciMLBase.remake(prob; p = ...)`, write `model => pars` instead.
 """
-function Base.Pair(model::System, pars::T) where T <: Params  
+pmap(model::System, pars::ModelParams) = PMapDict(model => pars)
+
+"""
+    Pair(model::System, pars::ModelParams) -> Vector{Pair}
+
+Flatten `pars` against `model` into a `Vector{Pair}` of `symbolic_parameter => value`
+entries (recursively walking sub-systems). This is the form accepted by
+`ODEProblem` and `SciMLBase.remake(prob; p = ...)`. Equivalent to writing
+`model => pars`.
+
+Fields of `pars` that don't have a matching property on `model` produce a warning
+and are skipped.
+"""
+function Base.Pair(model::System, pars::ModelParams)
+
+  #TODO: confirm that model and pars are properly paired
+
 
   prs = Pair[]
-  for nm in fieldnames(T)
+  for nm in fieldnames(pars)
     if hasproperty(model, nm)
-      x = getproperty(model,nm) => getproperty(pars,nm)
+      sym = getproperty(model,nm)
+      val = getproperty(pars,nm)
+      x = ModelingToolkit.unwrap(sym) => val
       if x isa Vector
         append!(prs, x)
       else
+        # if !ismissing(val) & !isnothing(val)
         push!(prs, x)
+        # end
       end
+    else
+      @warn "$(ModelingToolkit.get_name(model)) does not contain $nm"
     end
   end
 
@@ -182,17 +285,15 @@ end
 
 
 
-
-
 # support for saving ----------------------------
-function Base.Dict(x::T) where T <: Params 
+function Base.Dict(x::ModelParams)
 
   children = Pair[] 
 
-  for nm in fieldnames(T)
+  for nm in fieldnames(x)
 
       prop = getproperty(x, nm)
-      if typeof(prop) <: Params
+      if typeof(prop) <: ModelParams
         val = Dict(prop)
       else
         val = prop
@@ -204,7 +305,8 @@ function Base.Dict(x::T) where T <: Params
   return Dict(children)
 end
 
-function Base.setproperty!(x::T, dict::Dict) where T <: Params
+
+function Base.setproperty!(x::ModelParams, dict::Dict)
     for (key,value) in dict
         skey = Symbol(key)
         if value isa Dict
@@ -224,10 +326,10 @@ end
 # end
 
 
-function Base.setproperty!(dict::Dict, x::T, sys::System) where T <: Params
-  for nm in fieldnames(T)
+function Base.setproperty!(dict::Dict, x::ModelParams, sys::System)
+  for nm in fieldnames(x)
     prop = getproperty(x, nm)
-    if prop isa Params
+    if prop isa ModelParams
       setproperty!(dict, prop, getproperty(sys, nm))
     else
       dict[getproperty(sys, nm)] = prop
@@ -236,28 +338,24 @@ function Base.setproperty!(dict::Dict, x::T, sys::System) where T <: Params
 end
 
 
-function Base.copy(x::T) where T
-  
-  kwargs = Pair[]
-  for nm in fieldnames(T)
+function Base.copy(x::ModelParams)
+    parent = get_parent(x)
+    defs = get_defs(x)
 
-    prop = getproperty(x,nm)
-    push!(kwargs, nm => copy(prop))
-
-  end
-
-  return T(NamedTuple(kwargs)...)
+    return ModelParams(parent, copy(defs))
 end
 
 # fallback value conversion
 convert_value(x) = x
+convert_value(x::Missing) = "missing"
 
 """
-    save_parameters(x::Params, filepath::String)
+    save_parameters(x::ModelParams, filepath::String)
 
-Serialize `x` to a TOML file at `filepath`. 
+Write `x` to `filepath` as a hierarchical TOML file. `missing` values are stored
+as the string `"missing"` so they round-trip through [`load_parameters`](@ref).
 """
-function save_parameters(x::T, filepath::String) where T <: Params
+function save_parameters(x::ModelParams, filepath::String)
 
   open(filepath, "w") do io
     TOML.print(convert_value, io, Dict(x))
@@ -266,63 +364,65 @@ function save_parameters(x::T, filepath::String) where T <: Params
 end
 
 """
-    parameters_to_string(x::Params)
+    parameters_to_string(x::ModelParams) -> String
 
-Convert `x` to TOML string
+Return the TOML representation of `x` as a `String`. Same format as
+[`save_parameters`](@ref) writes, but without touching the filesystem.
 """
-function parameters_to_string(x::T) where T <: Params
+function parameters_to_string(x::ModelParams)
   io = IOBuffer()
   TOML.print(convert_value, io, Dict(x))
   return String(take!(io))
 end
 
 """
-    load_parameters(filepath::String, T::Type)
+    load_parameters(filepath::String, model::Function) -> ModelParams
 
-Read a TOML file written by `save_parameters` and return a new instance of `T` with
-the stored values applied.
+Construct a fresh `ModelParams(model)` and apply the values stored in the TOML file
+at `filepath` (typically written by [`save_parameters`](@ref)).
 """
-function load_parameters(filepath::String, T::Type)
+function load_parameters(filepath::String, model::Function)
 
-  t = T()
+  x = ModelParams(model)
+  setproperty!(x, TOML.parsefile(filepath))
 
-  setproperty!(t, TOML.parsefile(filepath))
-
-  return t
+  return x
 end
 
 """
-    string_to_parameters(contents::String, T::Type)
+    string_to_parameters(contents::String, x::ModelParams) -> ModelParams
 
-Parse a TOML string and return a new instance of `T`
-with the stored values applied.
+Apply parameter values parsed from the TOML string `contents` to the existing
+`ModelParams` instance `x`, mutating it in place. Returns `x`.
 """
-function string_to_parameters(contents::String, T::Type)
+function string_to_parameters(contents::String, x::ModelParams)
 
-  t = T()
+  setproperty!(x, TOML.parse(contents))
 
-  setproperty!(t, TOML.parse(contents))
-
-  return t
+  return x
 end
 
 
 """
-    cache(model::System, T::Type{<:Params}; parent=model)
+    cache(model::System, x::ModelParams; parent = model) -> Vector{ParameterHookWrapper}
 
-Pre-build a `Vector{ParameterHookWrapper}` of setter functions for every parameter
-field in `T`. Pass the returned vector to `update!` to efficiently modify an
-`ODEProblem` without rebuilding the setters on each call. `parent` should be the
-top-level system when `model` is a subsystem.
+Pre-build a vector of `SymbolicIndexingInterface` setter functions, one per
+parameter field reachable from `x` (recursing into sub-systems). Pass the result,
+together with a parameter map from [`pmap`](@ref), to [`update!`](@ref) or
+`SciMLBase.remake` to mutate an `ODEProblem` without rebuilding the setters on
+each call.
+
+`parent` is the top-level system used when constructing each `setp` setter; it
+only differs from `model` when `cache` recurses into a sub-system.
 """
-function cache(model::System, T::Type{<:Params}; parent=model)
+function cache(model::System, x::ModelParams; parent=model)
 
   prs = SymbolicIndexingInterface.ParameterHookWrapper[]
-  for nm in fieldnames(T)
+  for nm in fieldnames(x)
     if hasproperty(model, nm)
       p = getproperty(model,nm)
       if p isa System 
-        ps = cache(p, fieldtype(T, nm); parent)
+        ps = cache(p, getproperty(x, nm); parent)
         append!(prs, ps)
       else
         setter = setp(parent, p)
@@ -336,16 +436,16 @@ end
 
 
 """
-    update!(prob::ODEProblem, setters::Vector{ParameterHookWrapper}, param_map::Vector{<:Pair})
+    update!(prob::ODEProblem,
+            setters::Vector{ParameterHookWrapper},
+            param_dict::Dict) -> prob
 
-Mutate `prob` in-place by applying each setter in `setters` whose parameter appears in
-`param_map`. Obtain `setters` from `cache` and `param_map` from `Base.Pair(model, pars)`
-or `pmap`. Returns `prob`.
+Mutate `prob` in place by applying every setter in `setters` whose target
+parameter appears in `param_dict`. `setters` is produced by [`cache`](@ref) and
+`param_dict` by [`pmap`](@ref). Entries with `missing` values are skipped (the
+underlying setters do not accept `missing`). Returns `prob`.
 """
-function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_map::Vector{<:Pair})
-
-  # Create a dictionary for fast lookup
-  param_dict = Dict(param_map)
+function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_dict::PMapDict)
 
   # Apply each setter by matching its parameter to the param_dict
   for setter in setters
@@ -354,7 +454,10 @@ function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.Par
 
     # If this parameter is in our update map, apply it
     if haskey(param_dict, param)
-      setter(prob, param_dict[param])
+      val = Symbolics.value(param_dict[param])
+      if !ismissing(val) #setters don't support missing
+        setter(prob, val)
+      end
     end
   end
 
@@ -362,36 +465,77 @@ function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.Par
 end
 
 
-function SciMLBase.remake(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_map::Vector{<:Pair})
+"""
+    SciMLBase.remake(prob::ODEProblem,
+                     setters::Vector{ParameterHookWrapper},
+                     param_dict::Dict) -> ODEProblem
+
+Non-mutating counterpart to [`update!`](@ref): copies `prob.p` first so the
+original `prob` is left untouched, then applies the matching setters from
+`param_dict`. Use this when you need a new problem but want to keep the original
+intact.
+"""
+function SciMLBase.remake(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_dict::PMapDict)
     prob′ = SciMLBase.remake(prob; p = copy(prob.p)) #NOTE: if p is not set to a copy then p maintains the original reference
-    update!(prob′, setters, param_map)
+    update!(prob′, setters, param_dict)
     # return SciMLBase.remake(prob′) # Note: using remake a 2nd time could be implemented to provide initialization for solvable parameters, see example below...
     return prob′
 end
 
-#=
-pars = @parameters begin
-    total = missing, [guess=0]
-    p = 10
-end
-vars = @variables begin
-    x(t)=0
-    y(t)=1
-end
-eqs = [
-    D(x) ~ y*total
-    x + y + p ~ total
-]
-@mtkcompile sys = System(eqs, t, vars, pars)
-prob = ODEProblem(sys, [], (0, 1))
-prob.ps[total] # = 11
 
-# --------------
-prob2 = remake(prob) # make a copy
-pf(prob2, 20) # set the value
-prob2.ps[sys.total] # =11 total not yet updated
-prob3 = remake(prob2)  # run initialization
-prob3.ps[sys.total] # = 21 total now updated
-=#
+"""
+    @model_params Model(; sub = ChildComponent(p = 1), kw = value, ...)
+
+Convenience macro that rewrites `Model(...)` into `ModelParams(Model; ...)`,
+recursively transforming nested component constructor calls into nested
+`ModelParams` calls. Useful for declaring catalog entries inline.
+
+# Example
+```julia
+seat_pars = @model_params MassSpringDamper(
+    body   = Mass(m = 100),
+    spring = Spring(k = 1000),
+    damper = Damper(d = 1),
+)
+```
+expands (roughly) to
+```julia
+ModelParams(MassSpringDamper;
+    body   = ModelParams(Mass;   m = 100),
+    spring = ModelParams(Spring; k = 1000),
+    damper = ModelParams(Damper; d = 1),
+)
+```
+"""
+macro model_params(expr)
+    return esc(transform_params(expr))
+end
+
+function transform_params(expr)
+    # Base case: if it's not a function call (like a number or symbol), return it as is
+    if !(expr isa Expr && expr.head === :call)
+        return expr
+    end
+
+    # Extract the type (e.g., MassSpringDamper) and the arguments
+    model_type = expr.args[1]
+    args = expr.args[2:end]
+
+    # Process each argument recursively
+    processed_args = map(args) do arg
+        if arg isa Expr && arg.head === :kw
+            # Handle keyword arguments: key = value
+            key = arg.args[1]
+            value = transform_params(arg.args[2])
+            return Expr(:kw, key, value)
+        else
+            # Handle positional arguments
+            return transform_params(arg)
+        end
+    end
+
+    # Reconstruct as ModelParams(ModelType; kwargs...)
+    return :(ModelParams($model_type; $(processed_args...)))
+end
 
 end # module ModelingToolkitParameters
