@@ -38,7 +38,7 @@ This patern heavily relies on the `defaults` mechanism of the model to actually 
 @mtkbuild sys = Motor(k=1, r=2, l=3)
 ```
 
-This is simple enough, but what if we want another instance with `k, r, l` to be `4, 5, 6`?  Should we fully rebuild the model?  Instead it's better to set parameters at the ODEProblem level...
+This is simple enough, but what if we want another instance with `k, r, l` to be `4, 5, 6`?  Should we fully rebuild the model? No, this is inefficient.  Instead it's better to set parameters at the ODEProblem level with remake to reuse the already structurally simplified system...
 
 ```julia
 @mtkbuild sys = Motor()
@@ -48,7 +48,7 @@ prob1 = remake(prob; p = [sys.k => 1, sys.r => 2, sys.l => 3])
 prob2 = remake(prob; p = [sys.k => 4, sys.r => 5, sys.l => 6])
 ```
 
-Note, now we are __not__ using the keyword arguments of the model constructor.  Instead we are building the parameter map from scratch.  Therefore, the cons of the keyword model construction pattern are:
+Note, now we are __not__ using the keyword arguments of the model constructor now.  Instead we are building the parameter map from scratch.  Therefore, the cons of the keyword model construction pattern are:
 
  1. makes the model interface more complicated.  As the list of parameters grows, the keyword list becomes un-manageable
  2. it's essentially useless if more than one model instance is needed
@@ -61,7 +61,7 @@ The additional problems with this pattern are:
  6. parameter maps are not printed with heirarcy and are therefore not easily saved/retrieved to/from file using TOML or JSON
 
 # A Better Way
-ModelingToolkitParameters.jl exports an abstract type `Params` that can be used to build parameter maps using Julia structs.  The `Motor` component can now be defined as follows with no keyword arguments.  Then we can generate a `Params` type struct object to hold parameter values using the `build_params` function.
+ModelingToolkitParameters.jl provides a type `ModelParams` that creates a parameter object that is much easier to work with.  The `Motor` component can now be defined as follows with no keyword arguments.  Then we can generate a `ModelParams` object to hold parameter values.
 
 ```julia 
 using ModelingToolkitParameters
@@ -88,21 +88,32 @@ using ModelingToolkitParameters
   return ODESystem(eqs, t, vars, pars; name)
 end
 
-MotorParams = build_params(Motor)
+motor_pars = ModelParams(Motor)
+```
+Which gives...
+
+```julia
+Motor
+├─ k: 0.1
+├─ r: 0.01
+└─ l: 0.001
 ```
 
-
-Now we can build the parameter map by asking for the pair (=>):  `sys::ModelingToolkit.System => p::MotorParams`, for example
+Now we can build the parameter map by asking for the `pmap(sys::ModelingToolkit.System, p::MotorParams)`, for example
 
 ```julia
 @mtkbuild sys = Motor()
-motor_pars = MotorParams(k=1,r=2,l=3)
 
-pmap = sys => motor_pars
+motor_pars.k=1
+motor_pars.r=2
+motor_pars.l=3
+
+ps = pmap(sys, motor_pars)
 ```
 
 Gives...
-```
+
+```julia
 3-element Vector{Pair}:
  k => 1.0
  r => 2.0
@@ -112,102 +123,23 @@ Gives...
 Now we can easily modify parameters using the Julia parameter struct `motor_pars`.  Like
 
 ```julia
-prob = ODEProblem(sys, pmap, (0.1))
+prob = ODEProblem(sys, ps, (0, 0.1))
 
 motor_pars2 = copy(motor_pars)
 motor_pars2.k = 4.0
 
-prob2 = remake(prob; p = sys => motor_pars2)
+prob2 = remake(prob; p = pmap(sys, motor_pars2))
 ```
 
-Now that our parameters are generated from a Julia struct we have many additional benefits, we can:
-- use `getproperty` to set rules
-- define `print` rules (and save/load from file easily)
-- define `copy` 
-- define constructors
+Now that our parameters are given by an object, we have many additional benefits:
+- better display of parameters in tree form
+- parameter bounds are applied
+- save/load from file easily
+- copy, mutate, and remake (including with a fast cache method shown below)
+
 
 ## Model Heirarchy and Catalogs
-As we move into heirarcal models, we can continue the patern of defining a `struct` that maps to the component, however we now add the parameters and the child systems.  We will build a `MassSpringDamper` component that has the child systems `Mass`, `Spring`, and `Damper`. The Active Suspension model seen here [https://github.com/bradcarman/ActiveSuspensionModel/tree/main/ActiveSuspensionModel.jl](https://github.com/bradcarman/ActiveSuspensionModel/tree/main/ActiveSuspensionModel.jl) defines the simple mass, spring, damper components like
-
-```julia
-@component function Mass(; name)
-    pars = @parameters begin
-        m
-    end
-    vars = @variables begin
-        s(t)
-        v(t)
-        f(t)
-        a(t)
-    end
-    systems = @named begin
-        flange = MechanicalPort()
-    end 
-
-    @unpack g = globals
-    
-    eqs = [
-        s ~ flange.x
-        f ~ flange.f
-
-        D(s) ~ v
-        D(v) ~ a
-        m*a ~ f
-    ]
-    return System(eqs, t, vars, pars; name, systems)
-end
-
-MassParams = build_params(Mass)
-
-# ------------------------------------------------
-@component function Spring(; name)
-    pars = @parameters begin
-        k
-        initial_stretch=missing, [guess=0]
-    end
-    vars = @variables begin
-        delta_s(t)
-        f(t)
-    end
-    systems = @named begin
-        flange_a = MechanicalPort()
-        flange_b = MechanicalPort()
-    end 
-    eqs = [
-        delta_s ~ (flange_a.x - flange_b.x) + initial_stretch
-        f ~ k * delta_s
-        flange_a.f ~ +f
-        flange_b.f ~ -f
-    ]
-    return System(eqs, t, vars, pars; name, systems)
-end
-
-SpringParams = build_params(Spring)
-
-# ------------------------------------------------
-@component function Damper(; name)
-    pars = @parameters begin
-        d
-    end
-    vars = @variables begin
-        delta_s(t), [guess=0]
-        f(t), [guess=0]
-    end
-    systems = @named begin
-        flange_a = MechanicalPort()
-        flange_b = MechanicalPort()
-    end 
-    eqs = [
-        delta_s ~ flange_a.x - flange_b.x
-        f ~ D(delta_s) * d
-        flange_a.f ~ +f
-        flange_b.f ~ -f
-    ]
-    return System(eqs, t, vars, pars; name, systems)
-end
-
-DamperParams = build_params(Damper)
-```
+Let's explore a heirarchal model and how we can build and apply a catalog.  We will build a `MassSpringDamper` component that has the child systems `Mass`, `Spring`, and `Damper`. The Active Suspension model seen in the examples defines the simple mass, spring, damper components all with no defaults and no keyword constructors.
 
 Now, we can build a composite component MassSpringDamper
 
@@ -229,19 +161,17 @@ Now, we can build a composite component MassSpringDamper
 
     return System(eqs, t, [], []; systems, name)
 end
-
-MassSpringDamperParams = build_params(MassSpringDamper)
 ```
 
-This model will require several `MassSpringDampers` representing the wheels, the car and suspension, and the seat and passenger.  We can build a Catalog of these components easily like
+This model will require several `MassSpringDampers` representing the wheels, car, and seat.  We can build a Catalog of these components easily using the `@model_params` macro like
 
 ```julia
-const seat_pars = MassSpringDamperParams(;body=MassParams(m=100), spring=SpringParams(k=1000), damper=DamperParams(d=1))
-const car_pars = MassSpringDamperParams(;body=MassParams(m=1000), spring=SpringParams(k=1e4), damper=DamperParams(d=10))
-const wheel_pars = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringParams(k=1e2), damper=DamperParams(d=1e4))
+const seat_pars  = @model_params MassSpringDamper(body=Mass(m=100),  spring=Spring(k=1000), damper=Damper(d=1))
+const car_pars   = @model_params MassSpringDamper(body=Mass(m=1000), spring=Spring(k=1e4),  damper=Damper(d=10))
+const wheel_pars = @model_params MassSpringDamper(body=Mass(m=25),   spring=Spring(k=1e2),  damper=Damper(d=1e4))
 ```
 
-Now when we build the top level model
+Now when we build the top level model we can set the component initial_conditions to the catalog items as follows...
 
 ```julia
 @component function Model(; name)
@@ -254,43 +184,70 @@ Now when we build the top level model
         road = Position()
         force = Force()
         pid = Controller()
-        err = Add() 
+        err = Subtract() 
         set_point = Constant()
         seat_pos = PositionSensor()
-        flip = Gain()
+        flip = Gain(k=-1)
     end
 
     initial_conditions = [
-        (seat => seat_pars)... 
+        (seat => seat_pars)...
         (car_and_suspension => car_pars)...
         (wheel => wheel_pars)...
     ]
 
-    eqs = [
-        
-        # mechanical model
-        connect(road.s, road_data.output)
-        connect(road.flange, wheel.port_sd)
-        connect(wheel.port_m, car_and_suspension.port_sd)
-        connect(car_and_suspension.port_m, seat.port_sd, force.flange_a)
-        connect(seat.port_m, force.flange_b, seat_pos.flange)
-        
-        # controller        
-        connect(err.input1, seat_pos.output)
-        connect(err.input2, set_point.output)
-        connect(pid.err_input, err.output)
-        connect(pid.ctr_output, flip.input)
-        connect(flip.output, force.f)        
-    ]
+    . . .
 
-    return System(eqs, t, [], []; systems, name, initial_conditions)
+    return System(eqs, t, [], pars; systems, name, initialization_eqs, initial_conditions)
 end
 ```
 
-The parameter struct can be easily created from this catalog
+Now we can build a parameter object of `Model` as follows and see that the catalog was `MassSpringDamper` parameters was implemented...
 
 ```julia
-
+julia> sys_pars = ModelParams(ActiveSuspensionModel.Model)
+Model
+├─ g: -9.807
+├─ seat
+│  ├─ damper
+│  │  └─ d: 1.0
+│  ├─ body
+│  │  └─ m: 100.0
+│  └─ spring
+│     ├─ k: 1000.0
+│     └─ initial_stretch: missing
+├─ car_and_suspension
+│  ├─ damper
+│  │  └─ d: 10.0
+│  ├─ body
+│  │  └─ m: 1000.0
+│  └─ spring
+│     ├─ k: 10000.0
+│     └─ initial_stretch: missing
+├─ wheel
+│  ├─ damper
+│  │  └─ d: 10000.0
+│  ├─ body
+│  │  └─ m: 25.0
+│  └─ spring
+│     ├─ k: 100.0
+│     └─ initial_stretch: missing
+├─ road_data
+│  ├─ bump: 0.2
+│  ├─ freq: 0.5
+│  ├─ offset: 1.0
+│  └─ loop: 10
+├─ pid
+│  ├─ kp: 1.0
+│  ├─ ki: 0.2
+│  └─ kd: 20.0
+├─ err
+│  ├─ k1: 1.0
+│  └─ k2: -1
+├─ set_point
+│  └─ k: 0
+└─ flip
+   └─ k: -1
 ```
 
 
@@ -306,18 +263,20 @@ using SciMLBase
 using BenchmarkTools
 
 @mtkcompile model = ActiveSuspensionModel.Model()
-model_pars = ActiveSuspensionModel.ModelParams()
-prob = ODEProblem(model, model=>model_pars, (0, 10))
+model_pars = ModelParams(ActiveSuspensionModel.Model)
+prob = ODEProblem(model, pmap(model, model_pars), (0, 10))
 
 # Slow Option
 model_pars.seat.body.m = 200                                    # change parameters
-time_slow = @belapsed prob2 = remake($prob; p = $model => $model_pars)  # remake ODEProblem
+prob2 = remake(prob; p = pmap(model, model_pars))  # remake ODEProblem
+time_slow = @belapsed prob2 = remake($prob; p = pmap($model, $model_pars))  # remake ODEProblem
 
 # Fast Option
-model_setters = cache(model, ActiveSuspensionModel.ModelParams);# build cache (one time only)
+model_setters = cache(model, model_pars);# build cache (one time only)
 
 model_pars.seat.body.m = 300                                    # change parameters
-time_fast = @belapsed prob3 = remake($prob, $model_setters, $model => $model_pars)  # remake ODEProblem
+prob3 = remake(prob, model_setters, pmap(model, model_pars))
+time_fast = @belapsed prob3 = remake($prob, $model_setters, pmap($model, $model_pars))  # remake ODEProblem
 
 @show time_slow time_fast # hide
 nothing #hide
@@ -350,13 +309,13 @@ _Note: `convert_value` can be used to help with saving complex types.  See TOML 
 Then loading from file is done with `load_parameters(filepath::String, T::Type)` where `T` is the matching parameter struct type...
 
 ```julia; results="hidden"
-model_pars = load_parameters("model_pars.toml", ActiveSuspensionModel.ModelParams) 
+model_pars = load_parameters("model_pars.toml", ActiveSuspensionModel.Model) 
 ```
 
 From text, this works like the following
 
 ```@example speed
-p = ActiveSuspensionModel.RoadParams()
+p = ModelParams(ActiveSuspensionModel.Road)
 setproperty!(p, TOML.parse("""
                           bump = 0.3
                           freq = 0.75

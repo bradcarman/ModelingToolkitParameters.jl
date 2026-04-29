@@ -101,12 +101,9 @@ end
     return System(eqs, t, [], []; systems, name)
 end
 
-MassSpringDamperParams = build_params(MassSpringDamper; eval_module=@__MODULE__)
-
-const seat_pars = MassSpringDamperParams(;body=MassParams(m=100), spring=SpringParams(k=1000), damper=DamperParams(d=1))
-const car_pars = MassSpringDamperParams(;body=MassParams(m=1000), spring=SpringParams(k=1e4), damper=DamperParams(d=10))
-const wheel_pars = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringParams(k=1e2), damper=DamperParams(d=1e4))
-
+const seat_pars = @model_params MassSpringDamper(body=Mass(m=100), spring=Spring(k=1000), damper=Damper(d=1))
+const car_pars = @model_params MassSpringDamper(body=Mass(m=1000), spring=Spring(k=1e4), damper=Damper(d=10))
+const wheel_pars = @model_params MassSpringDamper(body=Mass(m=25), spring=Spring(k=1e2), damper=Damper(d=1e4))
 
 # Base.@kwdef mutable struct ModelParams <: Params
 #     # parameters
@@ -125,6 +122,10 @@ const wheel_pars = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringP
 
 @component function Model(; name)
 
+    pars = @parameters begin
+        g = -9.807
+    end
+
     systems = @named begin
         seat = MassSpringDamper()
         car_and_suspension = MassSpringDamper()
@@ -133,18 +134,16 @@ const wheel_pars = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringP
         road = Position()
         force = Force()
         pid = Controller()
-        err = Add() 
+        err = Subtract() 
         set_point = Constant()
         seat_pos = PositionSensor()
-        flip = Gain()
+        flip = Gain(k=-1)
     end
 
     initial_conditions = [
         (seat => seat_pars)...
         (car_and_suspension => car_pars)...
         (wheel => wheel_pars)...
-        (err => subtract)...
-        (flip => flip_pars)...
     ]
 
     
@@ -182,7 +181,7 @@ const wheel_pars = MassSpringDamperParams(;body=MassParams(m=25), spring=SpringP
         force.f.u ~ 0
     ]
 
-    return System(eqs, t, [], []; systems, name, initialization_eqs, initial_conditions)
+    return System(eqs, t, [], pars; systems, name, initialization_eqs, initial_conditions)
 end
 
 

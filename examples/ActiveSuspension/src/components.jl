@@ -35,8 +35,8 @@ const g = -9.807
 
 @component function Add(; name)
     pars = @parameters begin
-        k1
-        k2
+        k1=1.0
+        k2=1.0
     end
     systems = @named begin
         input1 = RealInput()
@@ -49,11 +49,15 @@ const g = -9.807
     return System(eqs, t, [], pars; name, systems)
 end
 
-AddParams = build_params(Add; eval_module = @__MODULE__)
+@component function Subtract(; name)
+    @named add = Add()
+    @unpack k2 = add
+    initial_conditions=[k2=>-1]
+    return extend(System(Equation[], t, [], []; initial_conditions, name), add)
+end
 
-const add = AddParams(k1=1,k2=1)
-const subtract = AddParams(k1=1,k2=-1)
-
+const add_pars = ModelParams(Add; k1=1, k2=1)
+const subtract_pars = ModelParams(Add; k1=1, k2=-1)
 
 @component function Constant(; name)
     pars = @parameters begin
@@ -69,9 +73,9 @@ const subtract = AddParams(k1=1,k2=-1)
 end
 
 
-@component function Gain(; name)
+@component function Gain(; name, k=1.0)
     pars = @parameters begin
-        k
+        k=k
     end
     systems = @named begin
         input = RealInput()
@@ -82,11 +86,6 @@ end
     ]
     return System(eqs, t, [], pars; name, systems)
 end
-
-GainParams = build_params(Gain; eval_module=@__MODULE__)
-
-const flip_pars = GainParams(-1)
-
 
 @component function Force(; name)
     systems = @named begin
@@ -154,7 +153,7 @@ end
 
 @component function Mass(; name)
     pars = @parameters begin
-        m
+        m, [bounds=(0.0, NaN)]
     end
     vars = @variables begin
         s(t)
@@ -180,16 +179,6 @@ end
     return System(eqs, t, vars, pars; name, systems)
 end
 
-MassParams = build_params(Mass; eval_module=@__MODULE__)
-
-function Base.setproperty!(value::typeof(MassParams), name::Symbol, x)
-    if name == :m
-        @assert x > 0 "mass (m) must be greater than 0"
-    end
-    Base.setfield!(value, name, x)
-end
-
-
 
 @component function Spring(; name)
     pars = @parameters begin
@@ -213,9 +202,6 @@ end
     return System(eqs, t, vars, pars; name, systems)
 end
 
-SpringParams = build_params(Spring; eval_module=@__MODULE__)
-
-
 @component function Damper(; name)
     pars = @parameters begin
         d
@@ -236,7 +222,5 @@ SpringParams = build_params(Spring; eval_module=@__MODULE__)
     ]
     return System(eqs, t, vars, pars; name, systems)
 end
-
-DamperParams = build_params(Damper; eval_module=@__MODULE__)
 
 # ----------------------------------

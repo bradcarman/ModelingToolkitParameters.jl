@@ -4,9 +4,6 @@ using ModelingToolkitParameters
 using Test
 
 
-
-
-
 @connector function Pin(;name)
     vars = @variables begin
         v(t)
@@ -33,7 +30,7 @@ end
         n = Pin()
     end
     pars = @parameters begin
-        R=1.0
+        R=1.0, [bounds=(0, Inf)]
     end
     eqs = [
         p.v - n.v ~ p.i * R
@@ -41,6 +38,7 @@ end
     ]        
     return System(eqs, t, [], pars; name, systems)
 end
+
 
 @component function Capacitor(;name)
     systems = @named begin
@@ -69,17 +67,16 @@ end
     end
     pars = @parameters begin
         V = 10.0
+        initial_voltage = missing, [guess=0]
     end
     eqs = [
-        V ~ p.v - n.v
+        V ~ p.v - n.v + initial_voltage
         0 ~ p.i + n.i
     ]        
     return System(eqs, t, [], pars; name, systems)
 end
 
-special = ModelParams(ConstantVoltage);
-special.V = 20.0
-
+special = ModelParams(ConstantVoltage; V = 20)
 
 @component function RCModel(use_resistor=true; name)
     systems = @named begin
@@ -119,7 +116,39 @@ end
 @named rc_model1 = RCModel(true)
 defs = ModelingToolkit.initial_conditions(rc_model1)
 
+
 rc_model1_params = ModelParams(rc_model1);
 @test rc_model1_params.source.V == special.V
+@test_throws ErrorException  rc_model1_params.resistor.R = -1
+@test rc_model1_params.resistor.R == 1.0
 
-Dict(rc_model1_params)
+
+@named rc_model2 = RCModel(false)
+defs = ModelingToolkit.initial_conditions(rc_model1)
+
+rc_model2_params = ModelParams(rc_model2)
+@test rc_model2_params.source.V == special.V
+
+rc_model1 => rc_model1_params
+rc_model2 => rc_model2_params
+
+
+rc_model1 => rc_model2_params
+rc_model2 => rc_model1_params
+
+
+cap = rc_model1_params.capacitor
+cap.C = 2.0
+
+rc_model2_params.capacitor = cap
+
+@test rc_model2_params.capacitor.C == 2.0
+
+
+rc_model3_params = ModelParams(RCModel; capacitor=ModelParams(Capacitor; C=3.0))
+
+rc_model1 => rc_model3_params
+
+
+sys = mtkcompile(rc_model1)
+@test_throws AssertionError ModelParams(sys)
