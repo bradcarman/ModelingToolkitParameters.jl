@@ -5,7 +5,7 @@ using OrdinaryDiffEq
 using Plots
 
 @mtkbuild sys = ActiveSuspensionModel.Model()
-sys_pars = ModelParams(ActiveSuspensionModel.Model)
+sys_pars = MTKParams(ActiveSuspensionModel.Model)
 prob = ODEProblem(sys, sys => sys_pars, (0, 10))
 sol = solve(prob)
 plot(sol; idxs=[sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s])

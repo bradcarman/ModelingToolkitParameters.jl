@@ -3,7 +3,8 @@
 ## Parameter Structure Generation
 
 ```@docs
-ModelingToolkitParameters.ModelParams
+ModelingToolkitParameters.MTKParams
+@mtkparams
 ```
 
 ## Parameter Map Generation
@@ -32,7 +33,7 @@ ModelingToolkitParameters.string_to_parameters
 ## Type Conversions
 
 ```julia
-Base.Dict(::ModelParams)
-Base.setproperty!(::ModelParams, ::Dict)
-Base.copy(::ModelParams)
+Base.Dict(::MTKParams)
+Base.setproperty!(::MTKParams, ::Dict)
+Base.copy(::MTKParams)
 ```

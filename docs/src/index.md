@@ -61,7 +61,7 @@ The additional problems with this pattern are:
  6. parameter maps are not printed with heirarcy and are therefore not easily saved/retrieved to/from file using TOML or JSON
 
 # A Better Way
-ModelingToolkitParameters.jl provides a type `ModelParams` that creates a parameter object that is much easier to work with.  The `Motor` component can now be defined as follows with no keyword arguments.  Then we can generate a `ModelParams` object to hold parameter values.
+ModelingToolkitParameters.jl provides a type `MTKParams` that creates a parameter object that is much easier to work with.  The `Motor` component can now be defined as follows with no keyword arguments.  Then we can generate a `MTKParams` object to hold parameter values.
 
 ```julia 
 using ModelingToolkitParameters
@@ -88,7 +88,7 @@ using ModelingToolkitParameters
   return ODESystem(eqs, t, vars, pars; name)
 end
 
-motor_pars = ModelParams(Motor)
+motor_pars = @mtkparams Motor()
 ```
 Which gives...
 
@@ -99,7 +99,17 @@ Motor
 └─ l: 0.001
 ```
 
-Now we can build the parameter map by asking for the `pmap(sys::ModelingToolkit.System, p::MotorParams)`, for example
+Note we can also enter keyword arguments here to override defaults.  Additionally, as will be shown in the next section, this can be done for child components as well.
+
+```julia
+julia> motor_pars = @mtkparams Motor(k=12, r=23, l=34)
+Motor
+├─ k: 12
+├─ r: 23
+└─ l: 34
+```
+
+A parameter map used for building `ODEProblem` can be generated from `pmap(sys::ModelingToolkit.System, p::MotorParams)`, for example
 
 ```julia
 @mtkbuild sys = Motor()
@@ -120,7 +130,7 @@ Gives...
  l => 3.0
 ```
 
-Now we can easily modify parameters using the Julia parameter struct `motor_pars`.  Like
+Now we can easily modify parameters using the Julia parameter object `motor_pars`.  Like
 
 ```julia
 prob = ODEProblem(sys, ps, (0, 0.1))
@@ -163,12 +173,12 @@ Now, we can build a composite component MassSpringDamper
 end
 ```
 
-This model will require several `MassSpringDampers` representing the wheels, car, and seat.  We can build a Catalog of these components easily using the `@model_params` macro like
+This model will require several `MassSpringDampers` representing the wheels, car, and seat.  We can build a Catalog of these components easily using the `@mtkparams` macro like
 
 ```julia
-const seat_pars  = @model_params MassSpringDamper(body=Mass(m=100),  spring=Spring(k=1000), damper=Damper(d=1))
-const car_pars   = @model_params MassSpringDamper(body=Mass(m=1000), spring=Spring(k=1e4),  damper=Damper(d=10))
-const wheel_pars = @model_params MassSpringDamper(body=Mass(m=25),   spring=Spring(k=1e2),  damper=Damper(d=1e4))
+const seat_pars  = @mtkparams MassSpringDamper(body=Mass(m=100),  spring=Spring(k=1000), damper=Damper(d=1))
+const car_pars   = @mtkparams MassSpringDamper(body=Mass(m=1000), spring=Spring(k=1e4),  damper=Damper(d=10))
+const wheel_pars = @mtkparams MassSpringDamper(body=Mass(m=25),   spring=Spring(k=1e2),  damper=Damper(d=1e4))
 ```
 
 Now when we build the top level model we can set the component initial_conditions to the catalog items as follows...
@@ -205,7 +215,7 @@ end
 Now we can build a parameter object of `Model` as follows and see that the catalog was `MassSpringDamper` parameters was implemented...
 
 ```julia
-julia> sys_pars = ModelParams(ActiveSuspensionModel.Model)
+julia> sys_pars = MTKParams(ActiveSuspensionModel.Model)
 Model
 ├─ g: -9.807
 ├─ seat
@@ -263,23 +273,23 @@ using SciMLBase
 using BenchmarkTools
 
 @mtkcompile model = ActiveSuspensionModel.Model()
-model_pars = ModelParams(ActiveSuspensionModel.Model)
+model_pars = @mtkparams ActiveSuspensionModel.Model()
 prob = ODEProblem(model, pmap(model, model_pars), (0, 10))
 
 # Slow Option
-model_pars.seat.body.m = 200                                    # change parameters
-prob2 = remake(prob; p = pmap(model, model_pars))  # remake ODEProblem
-time_slow = @belapsed prob2 = remake($prob; p = pmap($model, $model_pars))  # remake ODEProblem
+model_pars.seat.body.m = 200                                                # change parameters
+prob2 = remake(prob; p = pmap(model, model_pars))                           # remake ODEProblem
+time_slow = @belapsed prob2 = remake($prob; p = pmap($model, $model_pars))  # remake ODEProblem (timed)
 
 # Fast Option
 model_setters = cache(model, model_pars);# build cache (one time only)
 
-model_pars.seat.body.m = 300                                    # change parameters
-prob3 = remake(prob, model_setters, pmap(model, model_pars))
-time_fast = @belapsed prob3 = remake($prob, $model_setters, pmap($model, $model_pars))  # remake ODEProblem
+model_pars.seat.body.m = 300                                                            # change parameters
+prob3 = remake(prob, model_setters, pmap(model, model_pars))                            # fast remake ODEProblem
+time_fast = @belapsed prob3 = remake($prob, $model_setters, pmap($model, $model_pars))  # fast remake ODEProblem (timed)
 
 @show time_slow time_fast # hide
-nothing #hide
+nothing # hide
 ```
 
 
@@ -315,7 +325,7 @@ model_pars = load_parameters("model_pars.toml", ActiveSuspensionModel.Model)
 From text, this works like the following
 
 ```@example speed
-p = ModelParams(ActiveSuspensionModel.Road)
+p = @mtkparams ActiveSuspensionModel.Road()
 setproperty!(p, TOML.parse("""
                           bump = 0.3
                           freq = 0.75

@@ -76,7 +76,7 @@ end
     return System(eqs, t, [], pars; name, systems)
 end
 
-special = ModelParams(ConstantVoltage; V = 20)
+special = MTKParams(ConstantVoltage; V = 20)
 
 @component function RCModel(use_resistor=true; name)
     systems = @named begin
@@ -117,7 +117,7 @@ end
 defs = ModelingToolkit.initial_conditions(rc_model1)
 
 
-rc_model1_params = ModelParams(rc_model1);
+rc_model1_params = MTKParams(rc_model1);
 @test rc_model1_params.source.V == special.V
 @test_throws ErrorException  rc_model1_params.resistor.R = -1
 @test rc_model1_params.resistor.R == 1.0
@@ -126,7 +126,7 @@ rc_model1_params = ModelParams(rc_model1);
 @named rc_model2 = RCModel(false)
 defs = ModelingToolkit.initial_conditions(rc_model1)
 
-rc_model2_params = ModelParams(rc_model2)
+rc_model2_params = MTKParams(rc_model2)
 @test rc_model2_params.source.V == special.V
 
 rc_model1 => rc_model1_params
@@ -145,10 +145,10 @@ rc_model2_params.capacitor = cap
 @test rc_model2_params.capacitor.C == 2.0
 
 
-rc_model3_params = ModelParams(RCModel; capacitor=ModelParams(Capacitor; C=3.0))
+rc_model3_params = MTKParams(RCModel; capacitor=MTKParams(Capacitor; C=3.0))
 
 rc_model1 => rc_model3_params
 
 
 sys = mtkcompile(rc_model1)
-@test_throws AssertionError ModelParams(sys)
+@test_throws AssertionError MTKParams(sys)

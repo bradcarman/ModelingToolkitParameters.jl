@@ -56,8 +56,8 @@ end
     return extend(System(Equation[], t, [], []; initial_conditions, name), add)
 end
 
-const add_pars = ModelParams(Add; k1=1, k2=1)
-const subtract_pars = ModelParams(Add; k1=1, k2=-1)
+const add_pars = MTKParams(Add; k1=1, k2=1)
+const subtract_pars = MTKParams(Add; k1=1, k2=-1)
 
 @component function Constant(; name)
     pars = @parameters begin
