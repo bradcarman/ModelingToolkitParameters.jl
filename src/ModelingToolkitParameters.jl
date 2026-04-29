@@ -10,6 +10,33 @@ using AbstractTrees
 
 export ModelParams, get_parent, get_defs, pmap, cache, update!, @model_params, save_parameters, load_parameters
 
+"""
+    ModelParams(Model::Function; kwargs...)
+    ModelParams(sys::System;     kwargs...)
+
+A mutable, hierarchical parameter container for a ModelingToolkit `System`. Each
+field mirrors a parameter or sub-system of the underlying model and can be read or
+mutated with normal `getproperty`/`setproperty!` syntax (e.g. `pars.resistor.R = 2`).
+Bounds attached to parameters via `@parameters X, [bounds=(lo, hi)]` are enforced
+on assignment.
+
+The system must NOT be structurally simplified — construct it with `@named`
+(`@mtkcompile`/`@mtkbuild` will throw). Initial values come from
+`ModelingToolkit.initial_conditions(sys)`. Any keyword arguments are applied as
+parameter overrides after construction.
+
+Use [`pmap`](@ref) (or `model => pars`) to convert a `ModelParams` into the
+parameter map expected by `ODEProblem`/`SciMLBase.remake`, and [`cache`](@ref) +
+[`update!`](@ref) for fast in-place updates.
+
+# Examples
+```julia
+pars = ModelParams(RCModel)
+pars.resistor.R = 2.0
+
+pars = ModelParams(ConstantVoltage; V = 20)
+```
+"""
 struct ModelParams
     parent::System
     defs::Dict
@@ -20,7 +47,7 @@ function ModelParams(Model::Function; kwargs...)
   return ModelParams(sys; kwargs...)
 end
 
-function ModelParams(sys::System; kwargs...) 
+function ModelParams(sys::System; kwargs...)
   #NOTE: sys must be not structuraly simplified because we need access to the sub-systems
   @assert !ModelingToolkit.iscomplete(sys) "`ModelParams` cannot accept a structualy simplified system, please use @named only"
   m = ModelParams(ModelingToolkit.toggle_namespacing(sys, false), ModelingToolkit.initial_conditions(sys))
@@ -32,7 +59,20 @@ function ModelParams(sys::System; kwargs...)
   return m
 end
 
+"""
+    get_parent(p::ModelParams) -> System
+
+Return the underlying (un-simplified) `System` that backs `p`. Use this instead of
+`p.parent`, since `getproperty` on a `ModelParams` looks up parameters by name.
+"""
 get_parent(obj::ModelParams) = getfield(obj, :parent)
+
+"""
+    get_defs(p::ModelParams) -> Dict
+
+Return the internal `symbolic_parameter => value` dictionary holding the current
+overrides for `p`. Mutating the returned dict mutates `p`.
+"""
 get_defs(obj::ModelParams) = getfield(obj, :defs)
 
 function Base.getproperty(x::ModelParams, var::Symbol)
@@ -195,16 +235,27 @@ Base.show(io::IO, ::MIME"text/plain", x::ModelParams) =
 PMapDict = Dict{SymbolicUtils.BasicSymbolicImpl.var"typeof(BasicSymbolicImpl)"{SymReal}, SymbolicUtils.BasicSymbolicImpl.var"typeof(BasicSymbolicImpl)"{SymReal}}
 
 """
-    pmap(model::System, pars::ModelParams)
+    pmap(model::System, pars::ModelParams) -> Dict
 
-Return a parameter map suitable for passing to `ODEProblem`, `update!` or `SciMLBase.remake`.
+Build a `Dict{symbolic_parameter, value}` keyed by the symbolic parameters of
+`model`. This is the form accepted by [`update!`](@ref) and the cache-aware
+`SciMLBase.remake(prob, setters, param_dict)` method.
+
+For the flat `Vector{Pair}` form expected by `ODEProblem` and the standard
+`SciMLBase.remake(prob; p = ...)`, write `model => pars` instead.
 """
 pmap(model::System, pars::ModelParams) = PMapDict(model => pars)
 
 """
-    Pair(model::System, pars::ModelParams)
+    Pair(model::System, pars::ModelParams) -> Vector{Pair}
 
-Return a parameter map suitable for passing to `ODEProblem`, `update!` or `SciMLBase.remake`.
+Flatten `pars` against `model` into a `Vector{Pair}` of `symbolic_parameter => value`
+entries (recursively walking sub-systems). This is the form accepted by
+`ODEProblem` and `SciMLBase.remake(prob; p = ...)`. Equivalent to writing
+`model => pars`.
+
+Fields of `pars` that don't have a matching property on `model` produce a warning
+and are skipped.
 """
 function Base.Pair(model::System, pars::ModelParams)
 
@@ -301,7 +352,8 @@ convert_value(x::Missing) = "missing"
 """
     save_parameters(x::ModelParams, filepath::String)
 
-Serialize `x` to a TOML file at `filepath`. 
+Write `x` to `filepath` as a hierarchical TOML file. `missing` values are stored
+as the string `"missing"` so they round-trip through [`load_parameters`](@ref).
 """
 function save_parameters(x::ModelParams, filepath::String)
 
@@ -312,9 +364,10 @@ function save_parameters(x::ModelParams, filepath::String)
 end
 
 """
-    parameters_to_string(x::ModelParams)
+    parameters_to_string(x::ModelParams) -> String
 
-Convert `x` to TOML string
+Return the TOML representation of `x` as a `String`. Same format as
+[`save_parameters`](@ref) writes, but without touching the filesystem.
 """
 function parameters_to_string(x::ModelParams)
   io = IOBuffer()
@@ -323,10 +376,10 @@ function parameters_to_string(x::ModelParams)
 end
 
 """
-    load_parameters(filepath::String, T::Type)
+    load_parameters(filepath::String, model::Function) -> ModelParams
 
-Read a TOML file written by `save_parameters` and return a new instance of `T` with
-the stored values applied.
+Construct a fresh `ModelParams(model)` and apply the values stored in the TOML file
+at `filepath` (typically written by [`save_parameters`](@ref)).
 """
 function load_parameters(filepath::String, model::Function)
 
@@ -337,10 +390,10 @@ function load_parameters(filepath::String, model::Function)
 end
 
 """
-    string_to_parameters(contents::String, T::Type)
+    string_to_parameters(contents::String, x::ModelParams) -> ModelParams
 
-Parse a TOML string and return a new instance of `T`
-with the stored values applied.
+Apply parameter values parsed from the TOML string `contents` to the existing
+`ModelParams` instance `x`, mutating it in place. Returns `x`.
 """
 function string_to_parameters(contents::String, x::ModelParams)
 
@@ -351,12 +404,16 @@ end
 
 
 """
-    cache(model::System, x::ModelParams; parent=model)
+    cache(model::System, x::ModelParams; parent = model) -> Vector{ParameterHookWrapper}
 
-Pre-build a `Vector{ParameterHookWrapper}` of setter functions for every parameter
-field in `T`. Pass the returned vector to `update!` to efficiently modify an
-`ODEProblem` without rebuilding the setters on each call. `parent` should be the
-top-level system when `model` is a subsystem.
+Pre-build a vector of `SymbolicIndexingInterface` setter functions, one per
+parameter field reachable from `x` (recursing into sub-systems). Pass the result,
+together with a parameter map from [`pmap`](@ref), to [`update!`](@ref) or
+`SciMLBase.remake` to mutate an `ODEProblem` without rebuilding the setters on
+each call.
+
+`parent` is the top-level system used when constructing each `setp` setter; it
+only differs from `model` when `cache` recurses into a sub-system.
 """
 function cache(model::System, x::ModelParams; parent=model)
 
@@ -379,11 +436,14 @@ end
 
 
 """
-    update!(prob::ODEProblem, setters::Vector{ParameterHookWrapper}, param_map::Vector{<:Pair})
+    update!(prob::ODEProblem,
+            setters::Vector{ParameterHookWrapper},
+            param_dict::Dict) -> prob
 
-Mutate `prob` in-place by applying each setter in `setters` whose parameter appears in
-`param_map`. Obtain `setters` from `cache` and `param_map` from `Base.Pair(model, pars)`
-or `pmap`. Returns `prob`.
+Mutate `prob` in place by applying every setter in `setters` whose target
+parameter appears in `param_dict`. `setters` is produced by [`cache`](@ref) and
+`param_dict` by [`pmap`](@ref). Entries with `missing` values are skipped (the
+underlying setters do not accept `missing`). Returns `prob`.
 """
 function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_dict::PMapDict)
 
@@ -405,6 +465,16 @@ function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.Par
 end
 
 
+"""
+    SciMLBase.remake(prob::ODEProblem,
+                     setters::Vector{ParameterHookWrapper},
+                     param_dict::Dict) -> ODEProblem
+
+Non-mutating counterpart to [`update!`](@ref): copies `prob.p` first so the
+original `prob` is left untouched, then applies the matching setters from
+`param_dict`. Use this when you need a new problem but want to keep the original
+intact.
+"""
 function SciMLBase.remake(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_dict::PMapDict)
     prob′ = SciMLBase.remake(prob; p = copy(prob.p)) #NOTE: if p is not set to a copy then p maintains the original reference
     update!(prob′, setters, param_dict)
@@ -413,6 +483,30 @@ function SciMLBase.remake(prob::ODEProblem, setters::Vector{SymbolicIndexingInte
 end
 
 
+"""
+    @model_params Model(; sub = ChildComponent(p = 1), kw = value, ...)
+
+Convenience macro that rewrites `Model(...)` into `ModelParams(Model; ...)`,
+recursively transforming nested component constructor calls into nested
+`ModelParams` calls. Useful for declaring catalog entries inline.
+
+# Example
+```julia
+seat_pars = @model_params MassSpringDamper(
+    body   = Mass(m = 100),
+    spring = Spring(k = 1000),
+    damper = Damper(d = 1),
+)
+```
+expands (roughly) to
+```julia
+ModelParams(MassSpringDamper;
+    body   = ModelParams(Mass;   m = 100),
+    spring = ModelParams(Spring; k = 1000),
+    damper = ModelParams(Damper; d = 1),
+)
+```
+"""
 macro model_params(expr)
     return esc(transform_params(expr))
 end
