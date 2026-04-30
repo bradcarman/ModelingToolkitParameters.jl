@@ -101,9 +101,9 @@ end
     return System(eqs, t, [], []; systems, name)
 end
 
-const seat_pars = @mtkparams MassSpringDamper(body=Mass(m=100), spring=Spring(k=1000), damper=Damper(d=1))
-const car_pars = @mtkparams MassSpringDamper(body=Mass(m=1000), spring=Spring(k=1e4), damper=Damper(d=10))
-const wheel_pars = @mtkparams MassSpringDamper(body=Mass(m=25), spring=Spring(k=1e2), damper=Damper(d=1e4))
+@mtkparams const seat_pars = MassSpringDamper(body=Mass(m=100), spring=Spring(k=1000), damper=Damper(d=1))
+@mtkparams const car_pars = MassSpringDamper(body=Mass(m=1000), spring=Spring(k=1e4), damper=Damper(d=10))
+@mtkparams const wheel_pars = MassSpringDamper(body=Mass(m=25), spring=Spring(k=1e2), damper=Damper(d=1e4))
 
 # Base.@kwdef mutable struct MTKParams <: Params
 #     # parameters

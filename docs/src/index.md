@@ -41,11 +41,11 @@ This patern heavily relies on the `defaults` mechanism of the model to actually 
 This is simple enough, but what if we want another instance with `k, r, l` to be `4, 5, 6`?  Should we fully rebuild the model? No, this is inefficient.  Instead it's better to set parameters at the ODEProblem level with remake to reuse the already structurally simplified system...
 
 ```julia
-@mtkbuild sys = Motor()
-prob = ODEProblem(sys, [], (0,1))
+@mtkbuild sys = Motor() # build system once
+prob = ODEProblem(sys, [], (0,1)) # build problem once
 
-prob1 = remake(prob; p = [sys.k => 1, sys.r => 2, sys.l => 3])
-prob2 = remake(prob; p = [sys.k => 4, sys.r => 5, sys.l => 6])
+prob1 = remake(prob; p = [sys.k => 1, sys.r => 2, sys.l => 3]) # reuse prob, update parameters
+prob2 = remake(prob; p = [sys.k => 4, sys.r => 5, sys.l => 6]) # reuse prob, update parameters again
 ```
 
 Note, now we are __not__ using the keyword arguments of the model constructor now.  Instead we are building the parameter map from scratch.  Therefore, the cons of the keyword model construction pattern are:
@@ -88,7 +88,7 @@ using ModelingToolkitParameters
   return ODESystem(eqs, t, vars, pars; name)
 end
 
-motor_pars = @mtkparams Motor()
+@mtkparams motor_pars = Motor()
 ```
 Which gives...
 
@@ -99,15 +99,16 @@ Motor
 └─ l: 0.001
 ```
 
-Note we can also enter keyword arguments here to override defaults.  Additionally, as will be shown in the next section, this can be done for child components as well.
+!!! note "keyword args"
+    Note we can also enter keyword arguments here to override defaults.  Additionally, as will be shown in the next section, this can be done for child components as well.
 
-```julia
-julia> motor_pars = @mtkparams Motor(k=12, r=23, l=34)
-Motor
-├─ k: 12
-├─ r: 23
-└─ l: 34
-```
+    ```julia
+    julia> @mtkparams motor_pars = Motor(k=12, r=23, l=34)
+    Motor
+    ├─ k: 12
+    ├─ r: 23
+    └─ l: 34
+    ```
 
 A parameter map used for building `ODEProblem` can be generated from `pmap(sys::ModelingToolkit.System, p::MotorParams)`, for example
 
@@ -176,9 +177,9 @@ end
 This model will require several `MassSpringDampers` representing the wheels, car, and seat.  We can build a Catalog of these components easily using the `@mtkparams` macro like
 
 ```julia
-const seat_pars  = @mtkparams MassSpringDamper(body=Mass(m=100),  spring=Spring(k=1000), damper=Damper(d=1))
-const car_pars   = @mtkparams MassSpringDamper(body=Mass(m=1000), spring=Spring(k=1e4),  damper=Damper(d=10))
-const wheel_pars = @mtkparams MassSpringDamper(body=Mass(m=25),   spring=Spring(k=1e2),  damper=Damper(d=1e4))
+@mtkparams seat_pars  = MassSpringDamper(body=Mass(m=100),  spring=Spring(k=1000), damper=Damper(d=1))
+@mtkparams car_pars   = MassSpringDamper(body=Mass(m=1000), spring=Spring(k=1e4),  damper=Damper(d=10))
+@mtkparams wheel_pars = MassSpringDamper(body=Mass(m=25),   spring=Spring(k=1e2),  damper=Damper(d=1e4))
 ```
 
 Now when we build the top level model we can set the component initial_conditions to the catalog items as follows...
@@ -273,7 +274,7 @@ using SciMLBase
 using BenchmarkTools
 
 @mtkcompile model = ActiveSuspensionModel.Model()
-model_pars = @mtkparams ActiveSuspensionModel.Model()
+@mtkparams model_pars = ActiveSuspensionModel.Model()
 prob = ODEProblem(model, pmap(model, model_pars), (0, 10))
 
 # Slow Option
@@ -325,7 +326,7 @@ model_pars = load_parameters("model_pars.toml", ActiveSuspensionModel.Model)
 From text, this works like the following
 
 ```@example speed
-p = @mtkparams ActiveSuspensionModel.Road()
+@mtkparams p = ActiveSuspensionModel.Road()
 setproperty!(p, TOML.parse("""
                           bump = 0.3
                           freq = 0.75

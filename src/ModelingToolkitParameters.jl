@@ -121,7 +121,7 @@ function Base.setproperty!(x::MTKParams, var::Symbol, val)
     if (sym isa System) & (val isa MTKParams)
 
       child = getproperty(x, var)
-      for nm in fieldnames(child)
+      for nm in propertynames(child)
         setproperty!(child, nm, getproperty(val, nm))
       end
 
@@ -149,8 +149,7 @@ function has_nested_parameter(sys::System)
 end
 
 
-
-function Base.fieldnames(x::MTKParams)
+function Base.propertynames(x::MTKParams; private = false)
   sys = get_parent(x)
   # defs = get_defs(x)
 
@@ -178,8 +177,8 @@ end
 
 function Base.isequal(x::MTKParams, y::MTKParams)
   
-  names1 = fieldnames(x)
-  names2 = fieldnames(y)
+  names1 = propertynames(x)
+  names2 = propertynames(y)
   if length(names1) != length(names2)
     return false
   end
@@ -210,7 +209,7 @@ struct ParamsNode
 end
 
 AbstractTrees.children(x::MTKParams) =
-    [ParamsNode(n, getproperty(x, n)) for n in fieldnames(x)]
+    [ParamsNode(n, getproperty(x, n)) for n in propertynames(x)]
 
 AbstractTrees.children(n::ParamsNode) =
     n.value isa MTKParams ? AbstractTrees.children(n.value) : ()
@@ -263,7 +262,7 @@ function Base.Pair(model::System, pars::MTKParams)
 
 
   prs = Pair[]
-  for nm in fieldnames(pars)
+  for nm in propertynames(pars)
     if hasproperty(model, nm)
       sym = getproperty(model,nm)
       val = getproperty(pars,nm)
@@ -290,7 +289,7 @@ function Base.Dict(x::MTKParams)
 
   children = Pair[] 
 
-  for nm in fieldnames(x)
+  for nm in propertynames(x)
 
       prop = getproperty(x, nm)
       if typeof(prop) <: MTKParams
@@ -327,7 +326,7 @@ end
 
 
 function Base.setproperty!(dict::Dict, x::MTKParams, sys::System)
-  for nm in fieldnames(x)
+  for nm in propertynames(x)
     prop = getproperty(x, nm)
     if prop isa MTKParams
       setproperty!(dict, prop, getproperty(sys, nm))
@@ -418,7 +417,7 @@ only differs from `model` when `cache` recurses into a sub-system.
 function cache(model::System, x::MTKParams; parent=model)
 
   prs = SymbolicIndexingInterface.ParameterHookWrapper[]
-  for nm in fieldnames(x)
+  for nm in propertynames(x)
     if hasproperty(model, nm)
       p = getproperty(model,nm)
       if p isa System 
@@ -484,15 +483,19 @@ end
 
 
 """
-    @mtkparams Model(; sub = ChildComponent(p = 1), kw = value, ...)
+    @mtkparams name = Model(; sub = ChildComponent(p = 1), kw = value, ...)
+    @mtkparams const name = Model(; ...)
+    @mtkparams Model(; ...)                                   # bare-call form
 
 Convenience macro that rewrites `Model(...)` into `MTKParams(Model; ...)`,
 recursively transforming nested component constructor calls into nested
-`MTKParams` calls. Useful for declaring catalog entries inline.
+`MTKParams` calls. Wrapping an assignment lets the catalog name appear in front
+of the macro so the declaration reads top-to-bottom; `const` is also supported.
+The bare-call form (`name = @mtkparams Model(...)`) still works.
 
 # Example
 ```julia
-seat_pars = @mtkparams MassSpringDamper(
+@mtkparams seat_pars = MassSpringDamper(
     body   = Mass(m = 100),
     spring = Spring(k = 1000),
     damper = Damper(d = 1),
@@ -500,7 +503,7 @@ seat_pars = @mtkparams MassSpringDamper(
 ```
 expands (roughly) to
 ```julia
-MTKParams(MassSpringDamper;
+seat_pars = MTKParams(MassSpringDamper;
     body   = MTKParams(Mass;   m = 100),
     spring = MTKParams(Spring; k = 1000),
     damper = MTKParams(Damper; d = 1),
@@ -512,6 +515,18 @@ macro mtkparams(expr)
 end
 
 function transform_params(expr)
+    # Pass `const` declarations through, transforming the inner assignment
+    if expr isa Expr && expr.head === :const
+        return Expr(:const, transform_params(expr.args[1]))
+    end
+
+    # Pass assignments through, transforming only the right-hand side
+    if expr isa Expr && expr.head === :(=)
+        lhs = expr.args[1]
+        rhs = transform_params(expr.args[2])
+        return Expr(:(=), lhs, rhs)
+    end
+
     # Base case: if it's not a function call (like a number or symbol), return it as is
     if !(expr isa Expr && expr.head === :call)
         return expr

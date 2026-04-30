@@ -1,6 +1,6 @@
 # API Reference
 
-## Parameter Structure Generation
+## Parameter Object Generation
 
 ```@docs
 ModelingToolkitParameters.MTKParams
@@ -11,7 +11,7 @@ ModelingToolkitParameters.MTKParams
 
 ```@docs
 ModelingToolkitParameters.pmap
-Base.Pair(::ModelingToolkitBase.System, ::Params)
+Base.Pair(::ModelingToolkitBase.System, ::MTKParams)
 ```
 
 ## Caching and Updates
@@ -36,4 +36,12 @@ ModelingToolkitParameters.string_to_parameters
 Base.Dict(::MTKParams)
 Base.setproperty!(::MTKParams, ::Dict)
 Base.copy(::MTKParams)
+```
+
+# Internals
+Use this functions to access the internal properties of a `MTKParams` 
+
+```@docs
+get_parent
+get_defs
 ```

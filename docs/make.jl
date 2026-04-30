@@ -18,6 +18,7 @@ makedocs(;
         # "Code Generation" => "params.md",
         "API Reference" => "api.md",
     ],
+    checkdocs = :exports
 )
 
 deploydocs(;
