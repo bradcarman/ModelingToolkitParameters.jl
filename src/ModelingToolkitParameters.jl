@@ -389,6 +389,34 @@ function load_parameters(filepath::String, model::Function)
 end
 
 """
+    load_parameters(filepath::String, sys::System) -> MTKParams
+
+Construct a fresh `MTKParams(sys)` and apply the values stored in the TOML file
+at `filepath` (typically written by [`save_parameters`](@ref)).
+"""
+function load_parameters(filepath::String, sys::System)
+
+  x = MTKParams(sys)
+  setproperty!(x, TOML.parsefile(filepath))
+
+  return x
+end
+
+"""
+    load_parameters(filepath::String, x::MTKParams) -> MTKParams
+
+Apply the values stored in the TOML file at `filepath` 
+(typically written by [`save_parameters`](@ref)) to the `x::MTKParams` 
+parameter object.
+"""
+function load_parameters(filepath::String, x::MTKParams)
+
+  setproperty!(x, TOML.parsefile(filepath))
+
+  return x
+end
+
+"""
     string_to_parameters(contents::String, x::MTKParams) -> MTKParams
 
 Apply parameter values parsed from the TOML string `contents` to the existing

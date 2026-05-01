@@ -213,7 +213,7 @@ Now when we build the top level model we can set the component initial_condition
 end
 ```
 
-Now we can build a parameter object of `Model` as follows and see that the catalog was `MassSpringDamper` parameters was implemented...
+Now we can build a parameter object of `Model` as follows and see that the catalog of `MassSpringDamper` parameters was implemented...
 
 ```julia
 julia> sys_pars = MTKParams(ActiveSuspensionModel.Model)
@@ -334,3 +334,66 @@ setproperty!(p, TOML.parse("""
                           """))
 Dict(p)
 ```
+
+# Structural Parameters
+In some cases we might have a model that uses structural parameters, ones that change the system itself.  For example the model below has a structural parameter `use_resistor` which changes the model structurally, by either including or not including a resistor in the circuit.  
+
+```julia
+@component function RCModel(use_resistor=true; name)
+    systems = @named begin
+        capacitor = Capacitor()
+        source = ConstantVoltage()
+        ground = Ground()
+    end
+
+    initial_conditions = [
+        (source => special)...
+    ]
+
+    if use_resistor
+        @named resistor = Resistor()
+        push!(systems, resistor)
+    end
+    
+    eqs = if use_resistor
+        [
+            connect(source.p, resistor.p)
+            connect(resistor.n, capacitor.p)
+            connect(capacitor.n, source.n)
+            connect(capacitor.n, ground.g)
+        ]
+    else
+        [
+            connect(source.p, capacitor.p)
+            connect(capacitor.n, source.n)
+            connect(capacitor.n, ground.g)
+        ]
+    end
+    return System(eqs, t, [], []; name, systems, initial_conditions)
+end
+```
+
+For a model like this, we can't simply use the form `@mtkparams rcmodel_res_pars = RCModel()` or `rcmodel_res_pars = MTKParams(RCModel)`, because `RCModel` could have 2 different sets of parameters based on the build time structural parameter.  Instead, what we can do is build the parameter object from model instances, post build time, like...
+
+```@example rc_model
+include("../../test/model.jl") # hide
+@named rc_model_res = RCModel(true)
+rc_model_res_pars = MTKParams(rc_model_res)
+```
+
+And then without the resistor
+
+```@example rc_model
+@named rc_model_nor = RCModel(false)
+rc_model_nor_pars = MTKParams(rc_model_nor)
+```
+
+!!! note "load_parameters"
+    The same concept applies to `load_parameters`.  The 2nd argument can be either:
+    - a model constructor function
+    - an instantiated model `System`
+    - a `MTKParams` parameter object
+
+!!! warning "avoid simplified system"
+    `MTKParams` accepts only a non-structurally simplified `System` (i.e. use `@named` and not `@mtkcompile` ).  This is necessary so the sub-systems information is available, as structurally simplified systems are flattened.  
+
