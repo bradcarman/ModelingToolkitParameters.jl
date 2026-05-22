@@ -4,9 +4,9 @@ using SymbolicIndexingInterface
 using Symbolics
 using SciMLBase
 using InteractiveUtils: clipboard
-using JuliaFormatter: format_text
 using TOML
 using AbstractTrees
+using Logging
 
 export MTKParams, get_parent, get_defs, pmap, cache, update!, @mtkparams, save_parameters, load_parameters
 
@@ -130,6 +130,7 @@ function Base.setproperty!(x::MTKParams, var::Symbol, val)
     return nothing
 end
 
+Base.ismutable(x::MTKParams) = true
 
 function has_nested_parameter(sys::System)
 

@@ -1,21 +1,36 @@
 using ActiveSuspensionModel
-using ModelingToolkitParameters
 using ModelingToolkit
 using OrdinaryDiffEq
-using Plots
+using ModelingToolkitParameters
+using WGLMakie
 
 @mtkbuild sys = ActiveSuspensionModel.Model()
-sys_pars = MTKParams(ActiveSuspensionModel.Model)
-prob = ODEProblem(sys, sys => sys_pars, (0, 10))
+prob = ODEProblem(sys, [], (0, 10))
 sol = solve(prob)
-plot(sol; idxs=[sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s])
+idxs = [sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s]
 
+lines(sol; idxs)
+
+# Change Parameters
+@mtkparams sys_pars = ActiveSuspensionModel.Model()
+sys_pars.pid.kd = 200.0
+prob′ = remake(prob; p = pmap(sys, sys_pars))
+sol = solve(prob′)
+
+lines(sol; idxs)
+
+# Change Parameters (fast)
 sys_cache = cache(sys, sys_pars)
 
-# change parameter
-sys_pars.seat.damper.d = 100.0
+sys_pars.pid.kd = 2000.0
+prob′′ = remake(prob, sys_cache, pmap(sys, sys_pars))  
 
-prob = remake(prob, sys_cache, sys => sys_pars)
-sol = solve(prob)
-plot(sol; idxs=[sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s])
+sol = solve(prob′′)
 
+lines(sol; idxs)
+
+
+# Implement StructEditor extension
+
+using StructEditor
+editor(prob, sys_pars; idxs=[sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s], solve_kwargs=(dt=1e-4, adaptive=false)) #, mode=StructEditor.browser)
