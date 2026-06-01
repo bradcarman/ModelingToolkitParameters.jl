@@ -37,12 +37,10 @@ julia = "1"
 StructEditor = "f41bf64d-372c-4047-8f65-4cd74346a5da"
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"
 WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
-
-[targets]
-test = ["Test", "StructEditor", "WGLMakie"]
+ActiveSuspensionModel = "d21327f5-f906-4840-9bb0-2687f0591413"
 
 [workspace]
-projects = ["docs", "test"]
+projects = ["docs", "test", "examples/ActiveSuspension"]
 
 [sources]
 ActiveSuspensionModel = {path = "examples/ActiveSuspension"}

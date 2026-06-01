@@ -11,3 +11,7 @@ SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 ShoelaceWidgets = "1dc53738-a592-4c0c-95ab-f92b84dc4c89"
 StructEditor = "f41bf64d-372c-4047-8f65-4cd74346a5da"
 WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
+
+[sources]
+ActiveSuspensionModel = {path = "../examples/ActiveSuspension"}
+ModelingToolkitParameters = {path = ".."}
