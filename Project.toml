@@ -43,3 +43,6 @@ test = ["Test", "StructEditor", "WGLMakie"]
 
 [workspace]
 projects = ["docs", "test"]
+
+[sources]
+ActiveSuspensionModel = {path = "examples/ActiveSuspension"}
