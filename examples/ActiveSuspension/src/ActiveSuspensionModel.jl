@@ -251,7 +251,7 @@ end
 
 
 # API -----------------
-# @mtkbuild sys = System()
+# @mtkcompile sys = System()
 # initialization_eqs = [
 
 #     sys.seat.body.s ~ 1.5

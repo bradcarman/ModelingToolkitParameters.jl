@@ -4,7 +4,7 @@ using OrdinaryDiffEq
 using ModelingToolkitParameters
 using WGLMakie
 
-@mtkbuild sys = ActiveSuspensionModel.Model()
+@mtkcompile sys = ActiveSuspensionModel.Model()
 prob = ODEProblem(sys, [], (0, 10))
 sol = solve(prob)
 idxs = [sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s]

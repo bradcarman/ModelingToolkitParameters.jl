@@ -35,13 +35,13 @@ end
 This patern heavily relies on the `defaults` mechanism of the model to actually set the parameters of the model.  Let say we want `k, r, l` to be `1, 2, 3`.  One way we can do this is
 
 ```julia
-@mtkbuild sys = Motor(k=1, r=2, l=3)
+@mtkcompile sys = Motor(k=1, r=2, l=3)
 ```
 
 This is simple enough, but what if we want another instance with `k, r, l` to be `4, 5, 6`?  Should we fully rebuild the model? No, this is inefficient.  Instead it's better to set parameters at the ODEProblem level with remake to reuse the already structurally simplified system...
 
 ```julia
-@mtkbuild sys = Motor() # build system once
+@mtkcompile sys = Motor() # build system once
 prob = ODEProblem(sys, [], (0,1)) # build problem once
 
 prob1 = remake(prob; p = [sys.k => 1, sys.r => 2, sys.l => 3]) # reuse prob, update parameters
@@ -113,7 +113,7 @@ Motor
 A parameter map used for building `ODEProblem` can be generated from `pmap(sys::ModelingToolkit.System, p::MotorParams)`, for example
 
 ```julia
-@mtkbuild sys = Motor()
+@mtkcompile sys = Motor()
 
 motor_pars.k=1
 motor_pars.r=2
