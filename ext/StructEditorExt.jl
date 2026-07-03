@@ -101,11 +101,6 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
     
     name = ModelingToolkit.get_name(prob.f.sys)
 
-    save = SLButton("save")
-    on(save.value) do x
-        save_parameters(params, "$name.toml")
-    end
-
     fig = Figure(size=(750,450))
     ax = Axis(fig[1,1])
     if !isempty(idxs)
@@ -128,11 +123,12 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
         progress.visible[] = false
     end
 
-
     progress.visible[] = false
 
+    save_function = StructEditor.SaveFunction(func = () -> save_parameters(params, "$name.toml"))
+
     # The remaining kwargs... are cleanly passed to the underlying editor
-    editor(params; buttons = [save, run, progress, fig], kwargs...)
+    editor(params; save_function, buttons = [run, progress, fig], kwargs...)
 end
 
 end # module

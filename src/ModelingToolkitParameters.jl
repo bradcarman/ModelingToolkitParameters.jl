@@ -103,6 +103,11 @@ function Base.setproperty!(x::MTKParams, var::Symbol, val)
     sym = getproperty(parent, var)
 
     if ModelingToolkit.isparameter(sym)
+      if var in bound_parameter_names(parent)
+        source = binding_source(parent, var)
+        error("`$(ModelingToolkit.getname(sym))` is bound to `$(source)` and cannot be set independently; set `$(source)` instead.")
+      end
+
       if ModelingToolkit.hasbounds(sym)
         bounds = ModelingToolkit.getbounds(sym)
         
@@ -132,10 +137,72 @@ end
 
 Base.ismutable(x::MTKParams) = true
 
+"""
+    bound_parameter_names(sys::System) -> Set{Symbol}
+
+Return the names of the *bound* parameters local to `sys`. A parameter is bound
+when its value is fixed to an expression of other parameters via a binding, e.g.
+created by passing a parameter into a sub-component:
+
+```julia
+@parameters my_p
+@named inner = Foo(; p2 = my_p)   # inner.p2 is bound to my_p
+```
+
+Bound parameters are substituted away when the system is compiled and therefore
+cannot be set independently — only the binding source (`my_p` here) can be
+changed. `MTKParams` hides them from [`propertynames`](@ref) so they don't appear
+in the parameter object, the tree display, `pmap`, or `cache`. A plain numeric
+override (`p2 = 5.0`) is *not* a binding and stays tunable.
+
+This mirrors `ModelingToolkit.bound_parameters`, but reads the binding registry
+directly via `ModelingToolkit.bindings` so it works on the *uncompiled*
+hierarchical system that `MTKParams` requires (`bound_parameters` needs a
+completed system). Matching is by name: the symbol returned by `getproperty` on a
+sub-system is not identical (`isequal`) to the one in the binding registry, so a
+dict lookup by identity is unreliable.
+"""
+function bound_parameter_names(sys::System)
+  ModelingToolkit.has_bindings(sys) || return Set{Symbol}()
+  binds = ModelingToolkit.get_bindings(sys)
+  names = Set{Symbol}()
+  for k in keys(binds)
+    ismissing(binds[k]) && continue  # unresolved bindings stay tunable, matching bound_parameters
+    push!(names, Symbol(ModelingToolkit.getname(k)))
+  end
+  return names
+end
+
+"""
+    binding_source(sys::System, var::Symbol)
+
+Return the expression that the bound parameter `var` (local to `sys`) is bound to,
+for use in error messages. Looks the binding up by name (see
+[`bound_parameter_names`](@ref) for why identity lookup is unreliable).
+"""
+function binding_source(sys::System, var::Symbol)
+  ModelingToolkit.has_bindings(sys) || return nothing
+  binds = ModelingToolkit.get_bindings(sys)
+  for k in keys(binds)
+    Symbol(ModelingToolkit.getname(k)) == var && return binds[k]
+  end
+  return nothing
+end
+
+"""
+    is_free_param(sys::System, par) -> Bool
+
+Return `true` for parameters of `sys` that `MTKParams` should expose: real
+parameters that are neither `Initial(...)` bookkeeping parameters nor bound to
+another expression (see [`bound_parameter_names`](@ref)).
+"""
+is_free_param(sys::System, par, bnames = bound_parameter_names(sys)) =
+  !ModelingToolkit.isinitial(par) && !(Symbol(ModelingToolkit.getname(par)) in bnames)
+
 function has_nested_parameter(sys::System)
 
-  ps = ModelingToolkit.get_ps(sys)
-  if !isempty(ps)
+  bnames = bound_parameter_names(sys)
+  if any(par -> is_free_param(sys, par, bnames), ModelingToolkit.get_ps(sys))
     return true
   end
 
@@ -156,11 +223,15 @@ function Base.propertynames(x::MTKParams; private = false)
 
   names = Symbol[]
 
+  bnames = bound_parameter_names(sys)
   for par in ModelingToolkit.get_ps(sys)
     # scope = ModelingToolkit.getmetadata(par, ModelingToolkit.SymScope, ModelingToolkit.LocalScope())
     # scope isa ModelingToolkit.GlobalScope && continue
 
-    if !ModelingToolkit.isinitial(par) #avoids Initial(x) "parameters"
+    # is_free_param avoids Initial(x) "parameters" and parameters bound to
+    # another expression (e.g. `@named inner = Foo(; p2 = my_p)`), which cannot
+    # be set independently once the system is compiled.
+    if is_free_param(sys, par, bnames)
       push!(names, Symbol(ModelingToolkit.getname(par)))
     end
   end

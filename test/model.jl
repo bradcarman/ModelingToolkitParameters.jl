@@ -13,14 +13,17 @@ using Test
     return System(Equation[], t, vars, []; name)
 end
 
-@component function Ground(; name)
+@component function Ground(; name, bound)
+    pars = @parameters begin
+        bound = bound
+    end    
     systems = @named begin
         g = Pin()
     end
     eqs = [
         g.v ~ 0
     ]
-    return System(eqs, t, [], []; name, systems)
+    return System(eqs, t, [], pars; name, systems)
 end
 
 
@@ -78,10 +81,14 @@ end
 special = MTKParams(ConstantVoltage; V = 20)
 
 @component function RCModel(use_resistor=true; name)
+    pars = @parameters begin
+        bound = 1
+    end
+
     systems = @named begin
         capacitor = Capacitor()
         source = ConstantVoltage()
-        ground = Ground()
+        ground = Ground(; bound)
     end
 
     initial_conditions = [
@@ -107,7 +114,7 @@ special = MTKParams(ConstantVoltage; V = 20)
             connect(capacitor.n, ground.g)
         ]
     end
-    return System(eqs, t, [], []; name, systems, initial_conditions)
+    return System(eqs, t, [], pars; name, systems, initial_conditions)
 end
 
 
@@ -122,7 +129,7 @@ rc_model2_params = MTKParams(rc_model2)
 @test_throws ErrorException  rc_model1_params.resistor.R = -1
 @test rc_model1_params.resistor.R == 1.0
 @test rc_model2_params.source.V == special.V
-
+@test_throws ErrorException  rc_model1_params.ground.bound = 2
 
 cap = rc_model1_params.capacitor
 cap.C = 2.0
