@@ -56,12 +56,9 @@ end
     return extend(System(Equation[], t, [], []; initial_conditions, name), add)
 end
 
-const add_pars = MTKParams(Add; k1=1, k2=1)
-const subtract_pars = MTKParams(Add; k1=1, k2=-1)
-
-@component function Constant(; name)
+@component function Constant(; name, k)
     pars = @parameters begin
-        k=0
+        k=k
     end
     systems = @named begin
         output = RealOutput()
@@ -183,7 +180,7 @@ end
 @component function Spring(; name)
     pars = @parameters begin
         k
-        initial_stretch=missing, [guess=0]
+        initial_stretch=missing, [guess=10]
     end
     vars = @variables begin
         delta_s(t)

@@ -135,7 +135,7 @@ end
         force = Force()
         pid = Controller()
         err = Subtract() 
-        set_point = Constant()
+        set_point = Constant(k=1.5)
         seat_pos = PositionSensor()
         flip = Gain(k=-1)
     end

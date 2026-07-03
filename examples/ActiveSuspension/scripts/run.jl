@@ -6,22 +6,22 @@ using WGLMakie
 
 @mtkcompile sys = ActiveSuspensionModel.Model()
 prob = ODEProblem(sys, [], (0, 10))
-sol = solve(prob)
-idxs = [sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s]
+sol = solve(prob; dtmax=0.1)
 
+idxs = [sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s]
 lines(sol; idxs)
 
 # Start with different Defaults
 @mtkcompile sys = ActiveSuspensionModel.Model()
 @mtkparams sys_pars = ActiveSuspensionModel.Model(pid=ActiveSuspensionModel.Controller(kp=100))
 prob = ODEProblem(sys, pmap(sys, sys_pars), (0, 10))
-sol = solve(prob)
+sol = solve(prob; dtmax=0.1)
+lines(sol; idxs)
 
 # Change Parameters using `sys_pars` parameter object
 sys_pars.pid.kd = 200.0
 prob′ = remake(prob; p = pmap(sys, sys_pars))
-sol = solve(prob′)
-
+sol = solve(prob′; dtmax=0.1)
 lines(sol; idxs)
 
 # Change Parameters (fast)
@@ -30,7 +30,7 @@ sys_cache = cache(sys, sys_pars)
 sys_pars.pid.kd = 2000.0
 prob′′ = remake(prob, sys_cache, pmap(sys, sys_pars))  
 
-sol = solve(prob′′)
+sol = solve(prob′′; dtmax=0.1)
 
 lines(sol; idxs)
 
