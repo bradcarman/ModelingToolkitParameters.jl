@@ -177,17 +177,17 @@ model_setters = cache(model, model_pars);# build cache (one time only)
 
 model_pars.seat.body.m = 300                                                            # change parameters
 prob3 = remake(prob, model_setters, pmap(model, model_pars))                            # fast remake ODEProblem
-time_fast = @belapsed prob3 = remake($prob, $model_setters, pmap($model, $model_pars))  # fast remake ODEProblem (timed)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">time_slow = 0.025186167
-time_fast = 0.000202227</code></pre><h1 id="Saving-and-Loading-Parameters"><a class="docs-heading-anchor" href="#Saving-and-Loading-Parameters">Saving and Loading Parameters</a><a id="Saving-and-Loading-Parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Saving-and-Loading-Parameters" title="Permalink"></a></h1><p>The advantage of storing parameters into structs is that they can now be easily saved and loaded from text file.  The code below will demonstrate how to use the TOML format to create parameter files.  The TOML library in Julia can easily write out code if the data is in a dictionary.  We can easily convert our parameter structs to dictionary.</p><pre><code class="language-julia hljs">Dict(model_pars)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Dict{Symbol, Any} with 9 entries:
+time_fast = @belapsed prob3 = remake($prob, $model_setters, pmap($model, $model_pars))  # fast remake ODEProblem (timed)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">time_slow = 0.023176147
+time_fast = 0.000185077</code></pre><h1 id="Saving-and-Loading-Parameters"><a class="docs-heading-anchor" href="#Saving-and-Loading-Parameters">Saving and Loading Parameters</a><a id="Saving-and-Loading-Parameters-1"></a><a class="docs-heading-anchor-permalink" href="#Saving-and-Loading-Parameters" title="Permalink"></a></h1><p>The advantage of storing parameters into structs is that they can now be easily saved and loaded from text file.  The code below will demonstrate how to use the TOML format to create parameter files.  The TOML library in Julia can easily write out code if the data is in a dictionary.  We can easily convert our parameter structs to dictionary.</p><pre><code class="language-julia hljs">Dict(model_pars)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">Dict{Symbol, Any} with 9 entries:
   :pid                =&gt; Dict(:ki=&gt;0.2, :kp=&gt;1.0, :kd=&gt;20.0)
   :set_point          =&gt; Dict(:k=&gt;0)
   :flip               =&gt; Dict(:k=&gt;-1)
-  :wheel              =&gt; Dict{Symbol, Dict{Symbol}}(:spring=&gt;Dict{Symbol, Union…
+  :wheel              =&gt; Dict(:spring=&gt;Dict(:k=&gt;100.0), :body=&gt;Dict(:m=&gt;25.0), …
   :err                =&gt; Dict{Symbol, Real}(:k1=&gt;1.0, :k2=&gt;-1)
   :g                  =&gt; -9.807
   :road_data          =&gt; Dict{Symbol, Real}(:offset=&gt;1.0, :loop=&gt;10, :freq=&gt;0.5…
-  :car_and_suspension =&gt; Dict{Symbol, Dict{Symbol}}(:spring=&gt;Dict{Symbol, Union…
-  :seat               =&gt; Dict{Symbol, Dict{Symbol}}(:spring=&gt;Dict{Symbol, Union…</code></pre><p>Saving with TOML format (which can easily print from a <code>Dict</code>) can be done using</p><pre><code class="language-julia hljs">save_parameters(model_pars, &quot;model_pars.toml&quot;)</code></pre><p>This will save out a file that looks like...</p><pre><code class="language-julia hljs">using TOML
+  :car_and_suspension =&gt; Dict(:spring=&gt;Dict(:k=&gt;10000.0), :body=&gt;Dict(:m=&gt;1000.…
+  :seat               =&gt; Dict{Symbol, Dict{Symbol}}(:spring=&gt;Dict(:k=&gt;1000.0), …</code></pre><p>Saving with TOML format (which can easily print from a <code>Dict</code>) can be done using</p><pre><code class="language-julia hljs">save_parameters(model_pars, &quot;model_pars.toml&quot;)</code></pre><p>This will save out a file that looks like...</p><pre><code class="language-julia hljs">using TOML
 TOML.print(ModelingToolkitParameters.convert_value, Dict(model_pars))</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">g = -9.807
 
 [pid]
@@ -203,7 +203,6 @@ k = -1
 
 [wheel.spring]
 k = 100.0
-initial_stretch = &quot;missing&quot;
 
 [wheel.body]
 m = 25.0
@@ -223,7 +222,6 @@ bump = 0.2
 
 [car_and_suspension.spring]
 k = 10000.0
-initial_stretch = &quot;missing&quot;
 
 [car_and_suspension.body]
 m = 1000.0
@@ -233,7 +231,6 @@ d = 10.0
 
 [seat.spring]
 k = 1000.0
-initial_stretch = &quot;missing&quot;
 
 [seat.body]
 m = 300
@@ -282,6 +279,7 @@ Dict(p)</code></pre><pre class="documenter-example-output"><code class="nohighli
     return System(eqs, t, [], []; name, systems, initial_conditions)
 end</code></pre><p>For a model like this, we can&#39;t simply use the form <code>@mtkparams rcmodel_res_pars = RCModel()</code> or <code>rcmodel_res_pars = MTKParams(RCModel)</code>, because <code>RCModel</code> could have 2 different sets of parameters based on the build time structural parameter.  Instead, what we can do is build the parameter object from model instances, post build time, like...</p><pre><code class="language-julia hljs">@named rc_model_res = RCModel(true)
 rc_model_res_pars = MTKParams(rc_model_res)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">RCModel
+├─ bound: 1
 ├─ capacitor
 │  └─ C: 0.1
 ├─ source
@@ -290,8 +288,9 @@ rc_model_res_pars = MTKParams(rc_model_res)</code></pre><pre class="documenter-e
    └─ R: 1.0
 </code></pre><p>And then without the resistor</p><pre><code class="language-julia hljs">@named rc_model_nor = RCModel(false)
 rc_model_nor_pars = MTKParams(rc_model_nor)</code></pre><pre class="documenter-example-output"><code class="nohighlight hljs ansi">RCModel
+├─ bound: 1
 ├─ capacitor
 │  └─ C: 0.1
 └─ source
    └─ V: 20
-</code></pre><div class="admonition is-info" id="load_parameters-453f5649e17194f9"><header class="admonition-header">load_parameters<a class="admonition-anchor" href="#load_parameters-453f5649e17194f9" title="Permalink"></a></header><div class="admonition-body"><p>The same concept applies to <code>load_parameters</code>.  The 2nd argument can be either:</p><ul><li>a model constructor function</li><li>an instantiated model <code>System</code></li><li>a <code>MTKParams</code> parameter object</li></ul></div></div><div class="admonition is-warning" id="avoid-simplified-system-673f29c22c53646e"><header class="admonition-header">avoid simplified system<a class="admonition-anchor" href="#avoid-simplified-system-673f29c22c53646e" title="Permalink"></a></header><div class="admonition-body"><p><code>MTKParams</code> accepts only a non-structurally simplified <code>System</code> (i.e. use <code>@named</code> and not <code>@mtkcompile</code> ).  This is necessary so the sub-systems information is available, as structurally simplified systems are flattened.  </p></div></div></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="api/">API Reference »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Tuesday 16 June 2026 09:46">Tuesday 16 June 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
+</code></pre><div class="admonition is-info" id="load_parameters-453f5649e17194f9"><header class="admonition-header">load_parameters<a class="admonition-anchor" href="#load_parameters-453f5649e17194f9" title="Permalink"></a></header><div class="admonition-body"><p>The same concept applies to <code>load_parameters</code>.  The 2nd argument can be either:</p><ul><li>a model constructor function</li><li>an instantiated model <code>System</code></li><li>a <code>MTKParams</code> parameter object</li></ul></div></div><div class="admonition is-warning" id="avoid-simplified-system-673f29c22c53646e"><header class="admonition-header">avoid simplified system<a class="admonition-anchor" href="#avoid-simplified-system-673f29c22c53646e" title="Permalink"></a></header><div class="admonition-body"><p><code>MTKParams</code> accepts only a non-structurally simplified <code>System</code> (i.e. use <code>@named</code> and not <code>@mtkcompile</code> ).  This is necessary so the sub-systems information is available, as structurally simplified systems are flattened.  </p></div></div></article><nav class="docs-footer"><a class="docs-footer-nextpage" href="api/">API Reference »</a><div class="flexbox-break"></div><p class="footer-message">Powered by <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> and the <a href="https://julialang.org/">Julia Programming Language</a>.</p></nav></div><div class="modal" id="documenter-settings"><div class="modal-background"></div><div class="modal-card"><header class="modal-card-head"><p class="modal-card-title">Settings</p><button class="delete"></button></header><section class="modal-card-body"><p><label class="label">Theme</label><div class="select"><select id="documenter-themepicker"><option value="auto">Automatic (OS)</option><option value="documenter-light">documenter-light</option><option value="documenter-dark">documenter-dark</option><option value="catppuccin-latte">catppuccin-latte</option><option value="catppuccin-frappe">catppuccin-frappe</option><option value="catppuccin-macchiato">catppuccin-macchiato</option><option value="catppuccin-mocha">catppuccin-mocha</option></select></div></p><hr/><p>This document was generated with <a href="https://github.com/JuliaDocs/Documenter.jl">Documenter.jl</a> version 1.17.0 on <span class="colophon-date" title="Friday 3 July 2026 12:28">Friday 3 July 2026</span>. Using Julia version 1.12.6.</p></section><footer class="modal-card-foot"></footer></div></div></div></body></html>
