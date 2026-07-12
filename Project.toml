@@ -1,6 +1,6 @@
 name = "ModelingToolkitParameters"
 uuid = "d96c1b6d-73fa-42cf-8af9-45e6140feccb"
-version = "0.5.2"
+version = "0.5.3"
 authors = ["Brad Carman <bradleygcarman@outlook.com>"]
 
 [deps]
@@ -26,7 +26,7 @@ InteractiveUtils = "1.11.0"
 Logging = "1.11.0"
 ModelingToolkit = "10,11"
 SciMLBase = "2.128.0, 3"
-StructEditor = "0.4"
+StructEditor = "0.4.9"
 SymbolicIndexingInterface = "0.3.46"
 Symbolics = "6,7"
 TOML = "1.0.3"

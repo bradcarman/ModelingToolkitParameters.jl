@@ -45,9 +45,9 @@ end
 @component function Controller(; name)
     
     pars = @parameters begin
-        kp = 1.0
-        ki = 0.2
-        kd = 20.0
+        kp = 1.0, [bounds=(0.0, NaN)]
+        ki = 0.2, [bounds=(0.0, NaN)]
+        kd = 20.0, [bounds=(0.0, NaN)]
     end
 
     vars = @variables begin

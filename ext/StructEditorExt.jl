@@ -7,6 +7,7 @@ using WGLMakie
 using SciMLBase
 using StructEditor.ShoelaceWidgets
 using Logging
+using StructEditor.Bonito
 
 # Create a logger struct that holds a fallback "parent" logger
 struct SolveLogger <: Logging.AbstractLogger
@@ -43,6 +44,43 @@ function Logging.handle_message(logger::SolveLogger, level, message, _module, gr
 end
 
 const solve_logger = SolveLogger(global_logger())
+
+function StructEditor.make_control!(value::Observable{<: MTKParams}, ::Type{T}, sname::Symbol, dirty=identity) where T <: Number
+    name = string(sname)
+    val = getproperty(value[], sname)
+    h = StructEditor.help(typeof(value[]), Val(sname) )
+
+    parent = ModelingToolkitParameters.get_parent(value[])
+    defs = ModelingToolkitParameters.get_defs(value[])
+
+    sym = ModelingToolkitParameters.getproperty(parent, sname)
+
+    setmin=NaN
+    setmax=NaN
+    if ModelingToolkit.hasbounds(sym)
+        bounds = ModelingToolkit.getbounds(sym)
+    
+        setmin = bounds[1]
+        setmax = bounds[2]
+    end
+
+    y = SLInput(val; label=name, help=h, select_on_focus=true, min=setmin, max=setmax)
+    on(y.value) do x
+
+        # println(":: y ($name): $x")
+        if ismutable(value[])
+            setproperty!(value[], sname, T(x))
+        else
+            value[] = set(value[], PropertyLens(sname), T(x))
+        end
+
+        
+        dirty(true)
+    end
+
+    return [y]
+end
+
 
 
 """
@@ -86,6 +124,12 @@ StructEditor.editor(
 """
 function StructEditor.editor(prob::ODEProblem, params::MTKParams; 
                              idxs=[], 
+                             auto_run=true,
+                             path="/", 
+                             mode=StructEditor.vscode, 
+                             server = nothing,
+                             icon="https://icons.getbootstrap.com/assets/icons/play.svg", 
+                             title=ModelingToolkit.get_name(prob.f.sys),
                              alg=nothing,          # Capture the solver algorithm
                              solve_kwargs=(;),     # Capture solver-specific kwargs
                              kwargs...)            # Capture remaining editor kwargs
@@ -108,8 +152,7 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
         axislegend(ax)
     end
     
-    run = SLButton("run")
-    on(run.value) do x
+    function do_run()
         progress.visible[] = true
         run.loading[] = true
         prob′ = remake(prob, sys_cache, pmap(prob.f.sys, params))
@@ -123,12 +166,35 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
         progress.visible[] = false
     end
 
+
+    run = SLButton("run")
+    on(run.value) do x
+        do_run()
+    end
+
     progress.visible[] = false
 
-    save_function = StructEditor.SaveFunction(func = () -> save_parameters(params, "$name.toml"))
+    save_function = StructEditor.SaveFunction(func = () -> save_parameters(params, "$name.toml"))   
 
-    # The remaining kwargs... are cleanly passed to the underlying editor
-    editor(params; save_function, buttons = [run, progress, fig], kwargs...)
+    app = App() do session
+
+        # Build the form (and its widgets/Observables) fresh per session. Bonito
+        # widgets carry mutable per-session state, so a form shared across sessions
+        # breaks on the 2nd open (e.g. an SLSelect's value binding collides and the
+        # client sends NaN on change). Constructing inside the closure isolates each open.
+        obs_value = Observable(params)
+        if auto_run
+            on(obs_value) do x
+                do_run()
+            end
+        end
+
+        form = StructEditor.make_form(obs_value; save_function, buttons = [run, progress, fig], kwargs...)
+
+        StructEditor.page(form; title, icon)
+    end
+
+    return StructEditor.run_app(app; mode, server, path)
 end
 
 end # module

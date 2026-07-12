@@ -38,4 +38,14 @@ lines(sol; idxs)
 # Implement StructEditor extension
 
 using StructEditor
-editor(prob, sys_pars; idxs=[sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s], solve_kwargs=(dt=1e-4, adaptive=false)) #, mode=StructEditor.browser)
+
+StructEditor.skip_field(::Type{MTKParams}, ::Val{:g}) = true
+StructEditor.skip_field(::Type{MTKParams}, ::Val{:seat}) = true
+StructEditor.skip_field(::Type{MTKParams}, ::Val{:car_and_suspension}) = true
+StructEditor.skip_field(::Type{MTKParams}, ::Val{:wheel}) = true
+StructEditor.skip_field(::Type{MTKParams}, ::Val{:road_data}) = true
+StructEditor.skip_field(::Type{MTKParams}, ::Val{:err}) = true
+StructEditor.skip_field(::Type{MTKParams}, ::Val{:flip}) = true
+StructEditor.skip_field(::Type{MTKParams}, ::Val{:set_point}) = true
+
+editor(prob, sys_pars; idxs=[sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s], solve_kwargs=(dtmax=0.1,)) #, mode=StructEditor.browser)
