@@ -117,6 +117,12 @@ function Base.getproperty(x::MTKParams, var::Symbol)
 end
 
 function Base.setproperty!(x::MTKParams, var::Symbol, val)
+    # A `nothing` value means "leave this parameter at its existing/default value".
+    # This lets a partial override like `MTKParams(ConstantVoltage; V=30)` be merged
+    # into a parent without clobbering sibling defaults (e.g. `special`'s E1/E2) with
+    # `nothing` when the subsystem-merge loop below reads unset properties.
+    val === nothing && return nothing
+
     parent = get_parent(x)
     defs = get_defs(x)
 

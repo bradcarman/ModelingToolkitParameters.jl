@@ -123,7 +123,7 @@ end
 @component function Model(; name)
 
     pars = @parameters begin
-        g = -9.807
+        g
     end
 
     systems = @named begin
@@ -135,15 +135,21 @@ end
         force = Force()
         pid = Controller()
         err = Subtract() 
-        set_point = Constant(k=1.5)
+        set_point = Constant()
         seat_pos = PositionSensor()
-        flip = Gain(k=-1)
+        flip = Gain()
     end
 
     initial_conditions = [
         (seat => seat_pars)...
         (car_and_suspension => car_pars)...
         (wheel => wheel_pars)...
+    ]
+
+    bindings = [
+        set_point.k => 1.5
+        flip.k => -1
+        g => -9.807
     ]
 
     
@@ -181,7 +187,7 @@ end
         force.f.u ~ 0
     ]
 
-    return System(eqs, t, [], pars; systems, name, initialization_eqs, initial_conditions)
+    return System(eqs, t, [], pars; systems, name, initialization_eqs, initial_conditions, bindings)
 end
 
 

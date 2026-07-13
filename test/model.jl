@@ -70,6 +70,8 @@ end
     end
     pars = @parameters begin
         V = 10.0
+        E1
+        E2
     end
     eqs = [
         V ~ p.v - n.v
@@ -78,7 +80,7 @@ end
     return System(eqs, t, [], pars; name, systems)
 end
 
-special = MTKParams(ConstantVoltage; V = 20)
+special = MTKParams(ConstantVoltage; V = 20, E1=10, E2=20)
 
 @component function RCModel(use_resistor=true; name)
     pars = @parameters begin
@@ -137,7 +139,12 @@ rc_model2_params.capacitor = cap
 @test rc_model2_params.capacitor.C == 2.0
 
 
-rc_model3_params = MTKParams(RCModel; capacitor=MTKParams(Capacitor; C=3.0))
+rc_model3_params = MTKParams(RCModel; capacitor=MTKParams(Capacitor; C=3.0), source=MTKParams(ConstantVoltage; V=30))
+
+@test rc_model3_params.source.V == 30
+@test rc_model3_params.source.E1 == 10
+@test rc_model3_params.source.E2 == 20
+
 
 rc_model1 => rc_model3_params
 

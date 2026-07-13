@@ -33,10 +33,10 @@ const g = -9.807
 #   return System(Equation[], t, [], [g]; name)
 # end
 
-@component function Add(; name)
+@component function Adder(; name)
     pars = @parameters begin
-        k1=1.0
-        k2=1.0
+        k1
+        k2
     end
     systems = @named begin
         input1 = RealInput()
@@ -49,16 +49,23 @@ const g = -9.807
     return System(eqs, t, [], pars; name, systems)
 end
 
-@component function Subtract(; name)
-    @named add = Add()
-    @unpack k2 = add
-    initial_conditions=[k2=>-1]
-    return extend(System(Equation[], t, [], []; initial_conditions, name), add)
+@component function Add(; name)
+    @named adder = Adder()
+    @unpack k1, k2 = adder
+    bindings=[k1 => 1, k2=>1]
+    return extend(System(Equation[], t, [], []; bindings, name), adder)
 end
 
-@component function Constant(; name, k)
+@component function Subtract(; name)
+    @named adder = Adder()
+    @unpack k1, k2 = adder
+    bindings=[k1 => 1, k2=>-1]
+    return extend(System(Equation[], t, [], []; bindings, name), adder)
+end
+
+@component function Constant(; name)
     pars = @parameters begin
-        k=k
+        k
     end
     systems = @named begin
         output = RealOutput()
@@ -70,9 +77,9 @@ end
 end
 
 
-@component function Gain(; name, k=1.0)
+@component function Gain(; name)
     pars = @parameters begin
-        k=k
+        k
     end
     systems = @named begin
         input = RealInput()

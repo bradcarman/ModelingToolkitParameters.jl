@@ -7,28 +7,27 @@ using WGLMakie
 @mtkcompile sys = ActiveSuspensionModel.Model()
 prob = ODEProblem(sys, [], (0, 10))
 sol = solve(prob; dtmax=0.1)
-
 idxs = [sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s]
 lines(sol; idxs)
 
 # Start with different Defaults
 @mtkcompile sys = ActiveSuspensionModel.Model()
-@mtkparams sys_pars = ActiveSuspensionModel.Model(pid=ActiveSuspensionModel.Controller(kp=100))
-prob = ODEProblem(sys, pmap(sys, sys_pars), (0, 10))
+@mtkparams pars = ActiveSuspensionModel.Model(pid=ActiveSuspensionModel.Controller(kp=100))
+prob = ODEProblem(sys, pmap(sys, pars), (0, 10))
 sol = solve(prob; dtmax=0.1)
 lines(sol; idxs)
 
-# Change Parameters using `sys_pars` parameter object
-sys_pars.pid.kd = 200.0
-prob′ = remake(prob; p = pmap(sys, sys_pars))
+# Change Parameters using `pars` parameter object
+pars.pid.kd = 200.0
+prob′ = remake(prob; p = pmap(sys, pars))
 sol = solve(prob′; dtmax=0.1)
 lines(sol; idxs)
 
 # Change Parameters (fast)
-sys_cache = cache(sys, sys_pars)
+sys_cache = cache(sys, pars)
 
-sys_pars.pid.kd = 2000.0
-prob′′ = remake(prob, sys_cache, pmap(sys, sys_pars))  
+pars.pid.kd = 2000.0
+prob′′ = remake(prob, sys_cache, pmap(sys, pars))  
 
 sol = solve(prob′′; dtmax=0.1)
 
@@ -48,4 +47,4 @@ StructEditor.skip_field(::Type{MTKParams}, ::Val{:err}) = true
 StructEditor.skip_field(::Type{MTKParams}, ::Val{:flip}) = true
 StructEditor.skip_field(::Type{MTKParams}, ::Val{:set_point}) = true
 
-editor(prob, sys_pars; idxs=[sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s], solve_kwargs=(dtmax=0.1,)) #, mode=StructEditor.browser)
+editor(prob, pars; idxs=[sys.road.s.u, sys.seat.body.s, sys.car_and_suspension.body.s, sys.wheel.body.s], solve_kwargs=(dtmax=0.1,)) #, mode=StructEditor.browser)
