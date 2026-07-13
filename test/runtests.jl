@@ -5,6 +5,8 @@ using SciMLBase
 
 include("model.jl")
 
+include("parent_bindings.jl")
+
 @mtkcompile rc_model = RCModel()
 rc_model_params = MTKParams(RCModel)
 prob = ODEProblem(rc_model, rc_model => rc_model_params, (0, 10.0))

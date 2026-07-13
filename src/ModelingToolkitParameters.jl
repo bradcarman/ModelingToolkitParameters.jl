@@ -40,7 +40,18 @@ pars = MTKParams(ConstantVoltage; V = 20)
 struct MTKParams
     parent::System
     defs::Dict
+    # Parameters of *this* system that an enclosing parent binds via a namespaced
+    # entry in the parent's binding registry (Dyad's code generator does this),
+    # mapped to the expression they are bound to. Captured at descent time by
+    # `getproperty`, since a child `System` has no back-reference to its parent.
+    # Empty for the top-level system and for hand-written child-local bindings.
+    bound::Dict{Symbol, Any}
 end
+
+# Backward-compatible constructor: no parent-imposed bindings on this system.
+# `defs` is left untyped so any AbstractDict (e.g. `initial_conditions`'s
+# AtomicArrayDict) is converted by the inner constructor, as before.
+MTKParams(parent::System, defs) = MTKParams(parent, defs, Dict{Symbol, Any}())
 
 function MTKParams(Model::Function; kwargs...)
   @named sys = Model()
@@ -75,6 +86,15 @@ overrides for `p`. Mutating the returned dict mutates `p`.
 """
 get_defs(obj::MTKParams) = getfield(obj, :defs)
 
+"""
+    get_bound(p::MTKParams) -> Dict{Symbol, Any}
+
+Return the `param_name => bound_expression` map of parameters of `p`'s system that
+are bound by an *enclosing* parent (see [`parent_bindings`](@ref)). These cannot be
+set independently and are hidden from [`propertynames`](@ref).
+"""
+get_bound(obj::MTKParams) = getfield(obj, :bound)
+
 function Base.getproperty(x::MTKParams, var::Symbol)
     parent = get_parent(x)
     defs = get_defs(x)
@@ -82,7 +102,7 @@ function Base.getproperty(x::MTKParams, var::Symbol)
     sym = getproperty(parent, var)
 
     if typeof(sym) <: System
-      return MTKParams(sym, defs)
+      return MTKParams(sym, defs, parent_bindings(parent, var))
     else
       if !haskey(defs, sym)
         if ModelingToolkit.hasdefault(sym)
@@ -103,9 +123,13 @@ function Base.setproperty!(x::MTKParams, var::Symbol, val)
     sym = getproperty(parent, var)
 
     if ModelingToolkit.isparameter(sym)
+      # A parameter can be bound either in `parent`'s own registry (hand-written
+      # `Child(; p = expr)`) or by an enclosing parent under a namespaced key
+      # (Dyad codegen), captured in `get_bound(x)`. Both are un-settable.
       if var in bound_parameter_names(parent)
-        source = binding_source(parent, var)
-        error("`$(ModelingToolkit.getname(sym))` is bound to `$(source)` and cannot be set independently; set `$(source)` instead.")
+        bound_error(sym, binding_source(parent, var))
+      elseif haskey(get_bound(x), var)
+        bound_error(sym, get_bound(x)[var])
       end
 
       if ModelingToolkit.hasbounds(sym)
@@ -189,6 +213,38 @@ function binding_source(sys::System, var::Symbol)
   return nothing
 end
 
+bound_error(sym, source) =
+  error("`$(ModelingToolkit.getname(sym))` is bound to `$(source)` and cannot be set independently; set `$(source)` instead.")
+
+"""
+    parent_bindings(parent::System, subname::Symbol) -> Dict{Symbol, Any}
+
+Return the direct parameters of sub-system `subname` that are bound by an entry in
+`parent`'s binding registry, mapped to the expression they are bound to.
+
+Dyad's code generator records a child parameter binding on the *parent* under the
+namespaced key `subname₊param` (via `bindings[child.param] = expr`) rather than on
+the child under `param`. Such a child, examined in isolation, looks unbound because
+[`bound_parameter_names`](@ref) only reads its own registry. This recovers those
+names from the enclosing `parent`, so `MTKParams` can hide/protect them the same way
+it does hand-written child-local bindings.
+"""
+function parent_bindings(parent::System, subname::Symbol)
+  res = Dict{Symbol, Any}()
+  ModelingToolkit.has_bindings(parent) || return res
+  prefix = string(subname) * ModelingToolkit.NAMESPACE_SEPARATOR
+  for (k, v) in ModelingToolkit.get_bindings(parent)
+    ismissing(v) && continue  # unresolved bindings stay tunable
+    name = string(ModelingToolkit.getname(k))
+    startswith(name, prefix) || continue
+    local_name = chopprefix(name, prefix)
+    # only direct parameters of the sub; deeper names belong to its descendants
+    occursin(ModelingToolkit.NAMESPACE_SEPARATOR, local_name) && continue
+    res[Symbol(local_name)] = v
+  end
+  return res
+end
+
 """
     is_free_param(sys::System, par) -> Bool
 
@@ -199,9 +255,25 @@ another expression (see [`bound_parameter_names`](@ref)).
 is_free_param(sys::System, par, bnames = bound_parameter_names(sys)) =
   !ModelingToolkit.isinitial(par) && !(Symbol(ModelingToolkit.getname(par)) in bnames)
 
-function has_nested_parameter(sys::System)
+"""
+    has_nested_parameter(sys::System, extra_bound = Set{Symbol}()) -> Bool
 
-  bnames = bound_parameter_names(sys)
+Return `true` if `sys` (or any descendant) exposes a free parameter. `extra_bound`
+names parameters of `sys` that an enclosing parent binds via a namespaced entry
+(see [`parent_bindings`](@ref)) and are therefore *not* free. When recursing, each
+sub-system is checked against the names `sys` binds for it, so parent-side (Dyad)
+bindings are honoured at every level.
+
+    has_nested_parameter(parent::System, subname::Symbol) -> Bool
+
+Convenience method: check sub-system `subname` of `parent`, automatically supplying
+the parameters `parent` binds for it. Use this instead of
+`has_nested_parameter(parent.subname)` — a child fetched with `getproperty` carries
+no reference back to `parent`, so the parent's bindings would otherwise be invisible.
+"""
+function has_nested_parameter(sys::System, extra_bound::Set{Symbol} = Set{Symbol}())
+
+  bnames = union(bound_parameter_names(sys), extra_bound)
   if any(par -> is_free_param(sys, par, bnames), ModelingToolkit.get_ps(sys))
     return true
   end
@@ -209,12 +281,21 @@ function has_nested_parameter(sys::System)
   ss = ModelingToolkit.get_systems(sys)
 
   if !isempty(ss)
-    return any([has_nested_parameter(sub) for sub in ss])
+    return any(sub -> has_nested_parameter(sub, sub_bound_names(sys, sub)), ss)
   else
     return false
   end
 
 end
+
+has_nested_parameter(parent::System, subname::Symbol) =
+  has_nested_parameter(getproperty(parent, subname), sub_bound_names(parent, subname))
+
+# Names of `sub`'s parameters that `parent` binds via a namespaced entry.
+sub_bound_names(parent::System, sub::System) =
+  sub_bound_names(parent, Symbol(ModelingToolkit.getname(sub)))
+sub_bound_names(parent::System, subname::Symbol) =
+  Set{Symbol}(keys(parent_bindings(parent, subname)))
 
 
 function Base.propertynames(x::MTKParams; private = false)
@@ -223,7 +304,9 @@ function Base.propertynames(x::MTKParams; private = false)
 
   names = Symbol[]
 
-  bnames = bound_parameter_names(sys)
+  # `bound_parameter_names(sys)` covers child-local bindings; `get_bound(x)` adds
+  # parameters bound by an enclosing parent (Dyad codegen), captured at descent.
+  bnames = union(bound_parameter_names(sys), keys(get_bound(x)))
   for par in ModelingToolkit.get_ps(sys)
     # scope = ModelingToolkit.getmetadata(par, ModelingToolkit.SymScope, ModelingToolkit.LocalScope())
     # scope isa ModelingToolkit.GlobalScope && continue
@@ -237,7 +320,7 @@ function Base.propertynames(x::MTKParams; private = false)
   end
 
   for sub in ModelingToolkit.get_systems(sys)
-    if has_nested_parameter(sub)
+    if has_nested_parameter(sub, sub_bound_names(sys, sub))
       push!(names, Symbol(ModelingToolkit.getname(sub)))
     end
   end
@@ -410,10 +493,7 @@ end
 
 
 function Base.copy(x::MTKParams)
-    parent = get_parent(x)
-    defs = get_defs(x)
-
-    return MTKParams(parent, copy(defs))
+    return MTKParams(get_parent(x), copy(get_defs(x)), copy(get_bound(x)))
 end
 
 # fallback value conversion
