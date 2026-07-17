@@ -182,7 +182,7 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
         # widgets carry mutable per-session state, so a form shared across sessions
         # breaks on the 2nd open (e.g. an SLSelect's value binding collides and the
         # client sends NaN on change). Constructing inside the closure isolates each open.
-        obs_value = Observable(params)
+        obs_value = Observable(copy(params))
         if auto_run
             on(obs_value) do x
                 do_run()

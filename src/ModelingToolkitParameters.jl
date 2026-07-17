@@ -192,12 +192,19 @@ completed system). Matching is by name: the symbol returned by `getproperty` on 
 sub-system is not identical (`isequal`) to the one in the binding registry, so a
 dict lookup by identity is unreliable.
 """
+# A binding value of `missing` marks an *unresolved* binding: the parameter has no
+# fixed expression yet and stays tunable (matching `bound_parameters`). MTK records a
+# `p = missing, [guess=...]` default as a symbolic-`missing` constant, so `ismissing`
+# alone misses it — `Symbolics.value` unwraps the symbolic to the underlying `missing`
+# first (and is a no-op on plain `missing` and on real binding expressions).
+is_unresolved_binding(v) = ismissing(Symbolics.value(v))
+
 function bound_parameter_names(sys::System)
   ModelingToolkit.has_bindings(sys) || return Set{Symbol}()
   binds = ModelingToolkit.get_bindings(sys)
   names = Set{Symbol}()
   for k in keys(binds)
-    ismissing(binds[k]) && continue  # unresolved bindings stay tunable, matching bound_parameters
+    is_unresolved_binding(binds[k]) && continue
     push!(names, Symbol(ModelingToolkit.getname(k)))
   end
   return names
@@ -240,7 +247,7 @@ function parent_bindings(parent::System, subname::Symbol)
   ModelingToolkit.has_bindings(parent) || return res
   prefix = string(subname) * ModelingToolkit.NAMESPACE_SEPARATOR
   for (k, v) in ModelingToolkit.get_bindings(parent)
-    ismissing(v) && continue  # unresolved bindings stay tunable
+    is_unresolved_binding(v) && continue  # unresolved bindings stay tunable
     name = string(ModelingToolkit.getname(k))
     startswith(name, prefix) || continue
     local_name = chopprefix(name, prefix)

@@ -50,6 +50,7 @@ end
     end
     pars = @parameters begin
         C=0.1
+        m=missing, [guess=10]
     end
     vars = @variables begin
         v(t)=0
@@ -126,6 +127,8 @@ rc_model1_params = MTKParams(rc_model1)
 
 @named rc_model2 = RCModel(false)
 rc_model2_params = MTKParams(rc_model2)
+
+@test ismissing(rc_model1_params.capacitor.m)
 
 @test rc_model1_params.source.V == special.V
 @test_throws ErrorException  rc_model1_params.resistor.R = -1
