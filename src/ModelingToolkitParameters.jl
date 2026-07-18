@@ -46,12 +46,19 @@ struct MTKParams
     # `getproperty`, since a child `System` has no back-reference to its parent.
     # Empty for the top-level system and for hand-written child-local bindings.
     bound::Dict{Symbol, Any}
+    # Parameters of *this* system that an enclosing parent binds to an *unresolved*
+    # value (`missing`) — Dyad's `p = missing, [guess=...]` initialization params.
+    # Unlike `bound`, these stay tunable and visible; captured here only so their
+    # current value reads back as `missing` rather than `nothing` (the binding lives
+    # on the parent, so a child examined in isolation cannot recover it).
+    unresolved::Set{Symbol}
 end
 
-# Backward-compatible constructor: no parent-imposed bindings on this system.
+# Backward-compatible constructors: no parent-imposed bindings on this system.
 # `defs` is left untyped so any AbstractDict (e.g. `initial_conditions`'s
 # AtomicArrayDict) is converted by the inner constructor, as before.
-MTKParams(parent::System, defs) = MTKParams(parent, defs, Dict{Symbol, Any}())
+MTKParams(parent::System, defs) = MTKParams(parent, defs, Dict{Symbol, Any}(), Set{Symbol}())
+MTKParams(parent::System, defs, bound) = MTKParams(parent, defs, bound, Set{Symbol}())
 
 function MTKParams(Model::Function; kwargs...)
   @named sys = Model()
@@ -95,6 +102,16 @@ set independently and are hidden from [`propertynames`](@ref).
 """
 get_bound(obj::MTKParams) = getfield(obj, :bound)
 
+"""
+    get_unresolved(p::MTKParams) -> Set{Symbol}
+
+Return the names of parameters of `p`'s system that an *enclosing* parent binds to
+an unresolved value (`missing`) — solved during initialization (see
+[`parent_unresolved_names`](@ref)). These stay tunable and visible, but read back
+as `missing` until overridden.
+"""
+get_unresolved(obj::MTKParams) = getfield(obj, :unresolved)
+
 function Base.getproperty(x::MTKParams, var::Symbol)
     parent = get_parent(x)
     defs = get_defs(x)
@@ -102,11 +119,16 @@ function Base.getproperty(x::MTKParams, var::Symbol)
     sym = getproperty(parent, var)
 
     if typeof(sym) <: System
-      return MTKParams(sym, defs, parent_bindings(parent, var))
+      return MTKParams(sym, defs, parent_bindings(parent, var), parent_unresolved_names(parent, var))
     else
       if !haskey(defs, sym)
         if ModelingToolkit.hasdefault(sym)
           return ModelingToolkit.getdefault(sym)
+        elseif var in get_unresolved(x)
+          # Parent binds this parameter to an unresolved value (`missing`): it is
+          # solved during initialization. It stays tunable, but its current value
+          # is `missing`, not `nothing` (which means "unspecified").
+          return missing
         else
           return nothing
         end
@@ -244,18 +266,46 @@ it does hand-written child-local bindings.
 """
 function parent_bindings(parent::System, subname::Symbol)
   res = Dict{Symbol, Any}()
-  ModelingToolkit.has_bindings(parent) || return res
+  each_parent_binding(parent, subname) do local_name, v
+    is_unresolved_binding(v) && return  # unresolved bindings stay tunable
+    res[local_name] = v
+  end
+  return res
+end
+
+"""
+    parent_unresolved_names(parent::System, subname::Symbol) -> Set{Symbol}
+
+Return the direct parameters of sub-system `subname` that `parent` binds to an
+*unresolved* value (`missing`) — Dyad's `p = missing, [guess=...]` initialization
+parameters. These are the ones [`parent_bindings`](@ref) deliberately skips (they
+stay tunable), captured separately so `MTKParams` can report their value as
+`missing` rather than `nothing`.
+"""
+function parent_unresolved_names(parent::System, subname::Symbol)
+  res = Set{Symbol}()
+  each_parent_binding(parent, subname) do local_name, v
+    is_unresolved_binding(v) && push!(res, local_name)
+  end
+  return res
+end
+
+# Walk `parent`'s binding registry, invoking `f(local_name::Symbol, value)` for each
+# entry that binds a *direct* parameter of sub-system `subname` (namespaced key
+# `subname₊param`; deeper names belong to `subname`'s own descendants). Shared by
+# `parent_bindings` (resolved) and `parent_unresolved_names` (unresolved) so the
+# prefix-matching logic lives in one place.
+function each_parent_binding(f, parent::System, subname::Symbol)
+  ModelingToolkit.has_bindings(parent) || return
   prefix = string(subname) * ModelingToolkit.NAMESPACE_SEPARATOR
   for (k, v) in ModelingToolkit.get_bindings(parent)
-    is_unresolved_binding(v) && continue  # unresolved bindings stay tunable
     name = string(ModelingToolkit.getname(k))
     startswith(name, prefix) || continue
     local_name = chopprefix(name, prefix)
-    # only direct parameters of the sub; deeper names belong to its descendants
     occursin(ModelingToolkit.NAMESPACE_SEPARATOR, local_name) && continue
-    res[Symbol(local_name)] = v
+    f(Symbol(local_name), v)
   end
-  return res
+  return
 end
 
 """
@@ -506,7 +556,7 @@ end
 
 
 function Base.copy(x::MTKParams)
-    return MTKParams(get_parent(x), copy(get_defs(x)), copy(get_bound(x)))
+    return MTKParams(get_parent(x), copy(get_defs(x)), copy(get_bound(x)), copy(get_unresolved(x)))
 end
 
 # fallback value conversion
