@@ -12,7 +12,6 @@ RuntimeGeneratedFunctions = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
 WGLMakie = "276b4fcb-3e11-5398-bf8b-a0c2d153d008"
 
 [compat]
-OrdinaryDiffEq = "6.111.0"
 WGLMakie = "0.11.10"
 
 [extras]

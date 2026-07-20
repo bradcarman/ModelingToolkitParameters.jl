@@ -123,7 +123,7 @@ end
 @component function Model(; name)
 
     pars = @parameters begin
-        g = -9.807
+        g
     end
 
     systems = @named begin
@@ -149,7 +149,7 @@ end
     bindings = [
         set_point.k => 1.5
         flip.k => -1
-        # g => -9.807  #TODO: how to make this work?
+        g => -9.807  #TODO: how to make this work?
     ]
 
     

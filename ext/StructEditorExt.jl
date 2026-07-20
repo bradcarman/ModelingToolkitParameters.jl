@@ -152,46 +152,94 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
         axislegend(ax)
     end
     
-    function do_run()
-        progress.visible[] = true
-        run.loading[] = true
-        prob′ = remake(prob, sys_cache, pmap(prob.f.sys, params))
-        
-        # Apply the exact same solver args and kwargs to the update step
-        sol[] = with_logger(solve_logger) do 
-            solve(prob′, solver_args...; solve_kwargs..., progress=true)
-        end 
-        
-        run.loading[] = false
-        progress.visible[] = false
-    end
 
-
-    run = SLButton("run")
-    on(run.value) do x
-        do_run()
-    end
 
     progress.visible[] = false
 
     save_function = StructEditor.SaveFunction(func = () -> save_parameters(params, "$name.toml"))   
 
+    # Single-screen layout: a full-height grid with a title bar spanning the top,
+    # the parameter controls in a left pane (scrolls internally if tall), and the
+    # plot in a right pane that fills the remaining space. The figure is wrapped in
+    # `WithConfig(...; resize_to=:parent)` so it grows/shrinks with its pane instead
+    # of sitting at a fixed size below the inputs.
+    layout_css = """
+        .se-app {
+            display: grid;
+            grid-template-columns: minmax(280px, 26%) 1fr;
+            grid-template-rows: auto 1fr;
+            grid-template-areas: "header header" "controls plot";
+            gap: var(--sl-spacing-medium) var(--sl-spacing-large);
+            height: 100vh;
+            box-sizing: border-box;
+            padding: var(--sl-spacing-large);
+        }
+        .se-header { grid-area: header; margin: 0; }
+        .se-controls-pane {
+            grid-area: controls;
+            overflow-y: auto;
+            min-height: 0;
+        }
+        /* neutralize make_form's `.centered` (85vw) so it fills the left pane */
+        .se-controls { width: 95%; max-width: none; }
+        .se-plot-pane {
+            grid-area: plot;
+            min-width: 0;
+            min-height: 0;
+            border: 1px solid var(--sl-color-neutral-200);
+            border-radius: var(--sl-border-radius-large);
+            padding: var(--sl-spacing-small);
+            box-sizing: border-box;
+        }
+    """
+
     app = App() do session
 
-        # Build the form (and its widgets/Observables) fresh per session. Bonito
-        # widgets carry mutable per-session state, so a form shared across sessions
-        # breaks on the 2nd open (e.g. an SLSelect's value binding collides and the
-        # client sends NaN on change). Constructing inside the closure isolates each open.
+        
         obs_value = Observable(copy(params))
+        
+        function do_run()
+            progress.visible[] = true
+            run.loading[] = true
+            prob′ = remake(prob, sys_cache, pmap(prob.f.sys, obs_value[]))
+            
+            # Apply the exact same solver args and kwargs to the update step
+            sol[] = with_logger(solve_logger) do 
+                solve(prob′, solver_args...; solve_kwargs..., progress=true)
+            end 
+            
+            run.loading[] = false
+            progress.visible[] = false
+        end
+
+
+        run = SLButton("run")
+        on(run.value) do x
+            do_run()
+        end
+
+        
         if auto_run
             on(obs_value) do x
                 do_run()
             end
         end
 
-        form = StructEditor.make_form(obs_value; save_function, buttons = [run, progress, fig], kwargs...)
+        controls = StructEditor.make_form(obs_value; save_function,
+                                          buttons = [run, progress], class = "se-controls", kwargs...)
 
-        StructEditor.page(form; title, icon)
+        plot = DOM.div(WGLMakie.WithConfig(fig; resize_to = :parent);
+                       style = "width:100%; height:100%;")
+
+        layout = DOM.div(
+            DOM.style(layout_css),
+            DOM.h2(title; class = "se-header"),
+            DOM.div(controls; class = "se-controls-pane"),
+            DOM.div(plot; class = "se-plot-pane");
+            class = "se-app",
+        )
+
+        StructEditor.page(layout; title, icon)
     end
 
     return StructEditor.run_app(app; mode, server, path)
