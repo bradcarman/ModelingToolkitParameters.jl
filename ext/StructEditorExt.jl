@@ -134,29 +134,7 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
                              solve_kwargs=(;),     # Capture solver-specific kwargs
                              kwargs...)            # Capture remaining editor kwargs
     
-    sys_cache = cache(prob.f.sys, params)
-
-    # Splat the algorithm only if it was explicitly provided. 
-    # This allows DifferentialEquations.jl to use its default polyalgorithm if alg is nothing.
-    solver_args = isnothing(alg) ? () : (alg,)
-
-    # Apply the solver args and kwargs to the initial solve
-    sol = Observable(solve(prob, solver_args...; solve_kwargs...))
-    
-    name = ModelingToolkit.get_name(prob.f.sys)
-
-    fig = Figure(size=(750,450))
-    ax = Axis(fig[1,1])
-    if !isempty(idxs)
-        lines!(ax, sol; idxs)
-        axislegend(ax)
-    end
-    
-
-
-    progress.visible[] = false
-
-    save_function = StructEditor.SaveFunction(func = () -> save_parameters(params, "$name.toml"))   
+   
 
     # Single-screen layout: a full-height grid with a title bar spanning the top,
     # the parameter controls in a left pane (scrolls internally if tall), and the
@@ -181,7 +159,13 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
             min-height: 0;
         }
         /* neutralize make_form's `.centered` (85vw) so it fills the left pane */
-        .se-controls { width: 95%; max-width: none; }
+        .se-controls { width: 100%; max-width: none; box-sizing: border-box; }
+        /* the field `cell`s set inline `width:100%` + border/padding/margin, which
+           overflows (content-box) and adds a horizontal scrollbar. Fold border and
+           padding into the width, and let the cells size to `auto` so their margin
+           no longer pushes past the pane. */
+        .se-controls * { box-sizing: border-box; min-width: 0; }
+        .se-controls > div { width: auto !important; }
         .se-plot-pane {
             grid-area: plot;
             min-width: 0;
@@ -195,9 +179,31 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
 
     app = App() do session
 
-        
         obs_value = Observable(copy(params))
+
+        sys_cache = cache(prob.f.sys, obs_value[])
+
+        # Splat the algorithm only if it was explicitly provided. 
+        # This allows DifferentialEquations.jl to use its default polyalgorithm if alg is nothing.
+        solver_args = isnothing(alg) ? () : (alg,)
+
+        # Apply the solver args and kwargs to the initial solve
+        sol = Observable(solve(prob, solver_args...; solve_kwargs...))
         
+        name = ModelingToolkit.get_name(prob.f.sys)
+
+        fig = Figure(size=(750,450))
+        ax = Axis(fig[1,1])
+        if !isempty(idxs)
+            lines!(ax, sol; idxs)
+            axislegend(ax)
+        end
+        
+
+        progress.visible[] = false
+
+        save_function = StructEditor.SaveFunction(func = () -> save_parameters(obs_value[], "$name.toml"))   
+
         function do_run()
             progress.visible[] = true
             run.loading[] = true
