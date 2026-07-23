@@ -30,7 +30,7 @@ StructEditor = "0.4.9"
 SymbolicIndexingInterface = "0.3.46"
 Symbolics = "6,7"
 TOML = "1.0.3"
-WGLMakie = "0.10, 0.11"
+WGLMakie = "0.11, 0.12, 0.13"
 julia = "1"
 
 [extras]
