@@ -678,14 +678,39 @@ end
 
 
 """
+    resolve(val, param_dict::PMapDict)
+
+Reduce a [`pmap`](@ref) value to the concrete value a setter can write.
+
+A parameter's value is not always concrete: it can be a symbolic expression of *other*
+parameters in the same map. Dyad's code generator propagates a parent parameter into a
+sub-component by recording the child's initial condition as the parent's symbolic
+variable (`source₊medium_data => medium_data`), and defaults may be expressions of
+those (`source₊medium₊p_crit => critical_pressure_Pa(source₊medium_data)`). Such chains
+can be several levels deep.
+
+`SciMLBase.remake(prob; p = ...)` resolves these itself, but the [`cache`](@ref) setters
+write straight into the parameter buffer, so they have to be resolved here first —
+otherwise the raw symbolic reaches the buffer and fails to convert to the parameter's
+type. Concrete values (the common case) skip substitution entirely.
+"""
+function resolve(val, param_dict::PMapDict)
+  val = Symbolics.value(val)
+  symbolic_type(val) === NotSymbolic() && return val
+  return Symbolics.value(symbolic_evaluate(val, param_dict))
+end
+
+"""
     update!(prob::ODEProblem,
             setters::Vector{ParameterHookWrapper},
             param_dict::Dict) -> prob
 
 Mutate `prob` in place by applying every setter in `setters` whose target
 parameter appears in `param_dict`. `setters` is produced by [`cache`](@ref) and
-`param_dict` by [`pmap`](@ref). Entries with `missing` values are skipped (the
-underlying setters do not accept `missing`). Returns `prob`.
+`param_dict` by [`pmap`](@ref). Values that are symbolic expressions of other
+parameters in `param_dict` are resolved first (see [`resolve`](@ref)). Entries with
+`missing` values are skipped (the underlying setters do not accept `missing`).
+Returns `prob`.
 """
 function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_dict::PMapDict)
 
@@ -696,7 +721,7 @@ function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.Par
 
     # If this parameter is in our update map, apply it
     if haskey(param_dict, param)
-      val = Symbolics.value(param_dict[param])
+      val = resolve(param_dict[param], param_dict)
       if !ismissing(val) #setters don't support missing
         setter(prob, val)
       end

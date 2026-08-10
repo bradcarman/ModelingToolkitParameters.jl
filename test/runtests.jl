@@ -9,6 +9,8 @@ include("parent_bindings.jl")
 
 include("unresolved_bindings.jl")
 
+include("symbolic_values.jl")
+
 @mtkcompile rc_model = RCModel()
 rc_model_params = MTKParams(RCModel)
 rc_model_params.capacitor.m = 1 #set missing value
