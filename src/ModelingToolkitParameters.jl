@@ -8,7 +8,25 @@ using TOML
 using AbstractTrees
 using Logging
 
-export MTKParams, get_parent, get_defs, pmap, cache, update!, @mtkparams, save_parameters, load_parameters
+export MTKParams, get_parent, get_defs, pdict, cache, update!, transfer, compare, MTKParamsDiff, @mtkparams, save_parameters, load_parameters, show_missing!, hide_missing!
+
+"""
+    MTKParamsOptions()
+
+Mutable display-option flags for an [`MTKParams`](@ref) tree. A single instance is
+shared (by reference) across a whole `MTKParams` tree — every sub-`MTKParams`
+returned by `getproperty` carries the same `options` object as its parent — so
+toggling a flag anywhere in the tree (see [`show_missing!`](@ref)/
+[`hide_missing!`](@ref)) changes how the *entire* tree prints.
+"""
+mutable struct MTKParamsOptions
+  # Whether `nothing`/`missing` leaf values are printed in the tree display.
+  show_missing::Bool
+end
+
+MTKParamsOptions() = MTKParamsOptions(true)
+
+Base.copy(o::MTKParamsOptions) = MTKParamsOptions(o.show_missing)
 
 """
     MTKParams(Model::Function; kwargs...)
@@ -25,9 +43,12 @@ The system must NOT be structurally simplified — construct it with `@named`
 `ModelingToolkit.initial_conditions(sys)`. Any keyword arguments are applied as
 parameter overrides after construction.
 
-Use [`pmap`](@ref) (or `model => pars`) to convert a `MTKParams` into the
+Use [`pdict`](@ref) (or `model => pars`) to convert a `MTKParams` into the
 parameter map expected by `ODEProblem`/`SciMLBase.remake`, and [`cache`](@ref) +
 [`update!`](@ref) for fast in-place updates.
+
+The printed tree display shows `nothing`/`missing` leaf values by default; call
+[`hide_missing!`](@ref)/[`show_missing!`](@ref) to toggle this for the whole tree.
 
 # Examples
 ```julia
@@ -52,13 +73,17 @@ struct MTKParams
     # current value reads back as `missing` rather than `nothing` (the binding lives
     # on the parent, so a child examined in isolation cannot recover it).
     unresolved::Set{Symbol}
+    # Display-option flags, shared by reference across the whole tree. See
+    # `MTKParamsOptions`.
+    options::MTKParamsOptions
 end
 
 # Backward-compatible constructors: no parent-imposed bindings on this system.
 # `defs` is left untyped so any AbstractDict (e.g. `initial_conditions`'s
 # AtomicArrayDict) is converted by the inner constructor, as before.
-MTKParams(parent::System, defs) = MTKParams(parent, defs, Dict{Symbol, Any}(), Set{Symbol}())
-MTKParams(parent::System, defs, bound) = MTKParams(parent, defs, bound, Set{Symbol}())
+MTKParams(parent::System, defs) = MTKParams(parent, defs, Dict{Symbol, Any}(), Set{Symbol}(), MTKParamsOptions())
+MTKParams(parent::System, defs, bound) = MTKParams(parent, defs, bound, Set{Symbol}(), MTKParamsOptions())
+MTKParams(parent::System, defs, bound, unresolved) = MTKParams(parent, defs, bound, unresolved, MTKParamsOptions())
 
 function MTKParams(Model::Function; kwargs...)
   @named sys = Model()
@@ -68,7 +93,8 @@ end
 function MTKParams(sys::System; kwargs...)
   #NOTE: sys must be not structuraly simplified because we need access to the sub-systems
   @assert !ModelingToolkit.iscomplete(sys) "`MTKParams` cannot accept a structualy simplified system, please use @named only"
-  m = MTKParams(ModelingToolkit.toggle_namespacing(sys, false), ModelingToolkit.initial_conditions(sys))
+  sys_nn = ModelingToolkit.toggle_namespacing(sys, false)
+  m = MTKParams(sys_nn, ModelingToolkit.initial_conditions(sys), Dict{Symbol, Any}(), own_unresolved_names(sys_nn))
   
   for (key, value) in kwargs
     setproperty!(m, key, value)
@@ -112,6 +138,32 @@ as `missing` until overridden.
 """
 get_unresolved(obj::MTKParams) = getfield(obj, :unresolved)
 
+"""
+    get_options(p::MTKParams) -> MTKParamsOptions
+
+Return `p`'s display-option flags. Shared by reference across the whole tree `p`
+belongs to — see [`MTKParamsOptions`](@ref).
+"""
+get_options(obj::MTKParams) = getfield(obj, :options)
+
+"""
+    show_missing!(p::MTKParams)
+
+Turn on display of `nothing`/`missing` leaf values when printing `p` (the
+default). Applies to the whole `MTKParams` tree `p` belongs to, since display
+options are shared across it — see [`hide_missing!`](@ref).
+"""
+show_missing!(x::MTKParams) = (get_options(x).show_missing = true; nothing)
+
+"""
+    hide_missing!(p::MTKParams)
+
+Turn off display of `nothing`/`missing` leaf values when printing `p`. Applies to
+the whole `MTKParams` tree `p` belongs to, since display options are shared across
+it — see [`show_missing!`](@ref).
+"""
+hide_missing!(x::MTKParams) = (get_options(x).show_missing = false; nothing)
+
 function Base.getproperty(x::MTKParams, var::Symbol)
     parent = get_parent(x)
     defs = get_defs(x)
@@ -119,7 +171,8 @@ function Base.getproperty(x::MTKParams, var::Symbol)
     sym = getproperty(parent, var)
 
     if typeof(sym) <: System
-      return MTKParams(sym, defs, parent_bindings(parent, var), parent_unresolved_names(parent, var))
+      unresolved = union(parent_unresolved_names(parent, var), own_unresolved_names(sym))
+      return MTKParams(sym, defs, parent_bindings(parent, var), unresolved, get_options(x))
     else
       if !haskey(defs, sym)
         if ModelingToolkit.hasdefault(sym)
@@ -204,7 +257,7 @@ created by passing a parameter into a sub-component:
 Bound parameters are substituted away when the system is compiled and therefore
 cannot be set independently — only the binding source (`my_p` here) can be
 changed. `MTKParams` hides them from [`propertynames`](@ref) so they don't appear
-in the parameter object, the tree display, `pmap`, or `cache`. A plain numeric
+in the parameter object, the tree display, `pdict`, or `cache`. A plain numeric
 override (`p2 = 5.0`) is *not* a binding and stays tunable.
 
 This mirrors `ModelingToolkit.bound_parameters`, but reads the binding registry
@@ -286,6 +339,34 @@ function parent_unresolved_names(parent::System, subname::Symbol)
   res = Set{Symbol}()
   each_parent_binding(parent, subname) do local_name, v
     is_unresolved_binding(v) && push!(res, local_name)
+  end
+  return res
+end
+
+"""
+    own_unresolved_names(sys::System) -> Set{Symbol}
+
+Return the direct parameters of `sys` that `sys` *itself* binds to an unresolved
+value (`missing`) — Dyad's `p = missing, [guess=...]` initialization parameters
+declared directly on `sys`, as recorded under a plain (non-namespaced) key in
+`sys`'s own binding registry.
+
+This is distinct from [`parent_unresolved_names`](@ref), which only recovers a
+`missing` marker that an *enclosing* system re-binds under a namespaced key
+(`subname₊param`). Dyad does not always lift a component's own `missing` default
+into the parent's registry that way — it is frequently left as a plain entry in
+the component's own registry instead — so `MTKParams` must check both sources when
+descending into a sub-system, or such parameters read back as `nothing` (meaning
+"unspecified") rather than `missing` (meaning "unresolved, solved at
+initialization").
+"""
+function own_unresolved_names(sys::System)
+  ModelingToolkit.has_bindings(sys) || return Set{Symbol}()
+  res = Set{Symbol}()
+  for (k, v) in ModelingToolkit.get_bindings(sys)
+    name = string(ModelingToolkit.getname(k))
+    occursin(ModelingToolkit.NAMESPACE_SEPARATOR, name) && continue
+    is_unresolved_binding(v) && push!(res, Symbol(name))
   end
   return res
 end
@@ -416,6 +497,113 @@ end
 
 
 """
+    Absent
+
+Sentinel marking a path that exists on one side of a [`compare`](@ref) but not
+the other (e.g. `pars1` and `pars2` were built from different model variants).
+Distinct from a parameter that exists but is unset (`nothing`) or unresolved
+(`missing`).
+"""
+struct Absent end
+const _ABSENT = Absent()
+
+"""
+    MTKParamsDiffRow(path, value1, value2)
+
+One row of a [`MTKParamsDiff`](@ref): `path` is the dotted parameter path
+(e.g. `"seat.spring.initial_stretch"`), `value1`/`value2` are the differing
+values from each side (or `Absent` if the path doesn't exist on that side).
+"""
+struct MTKParamsDiffRow
+  path::String
+  value1::Any
+  value2::Any
+end
+
+"""
+    MTKParamsDiff(rows::Vector{MTKParamsDiffRow})
+
+Result of [`compare`](@ref): the parameter paths where two `MTKParams` trees
+differ. Displays as a table (`path`, `pars1` value, `pars2` value); if `rows`
+is empty, displays as "No differences.".
+"""
+struct MTKParamsDiff
+  rows::Vector{MTKParamsDiffRow}
+end
+
+format_diff_value(::Absent) = "–"
+format_diff_value(v) = sprint(show, v; context = :compact => true)
+
+function Base.show(io::IO, ::MIME"text/plain", d::MTKParamsDiff)
+  if isempty(d.rows)
+    print(io, "No differences.")
+    return
+  end
+
+  header = ("Parameter", "pars1", "pars2")
+  paths = [r.path for r in d.rows]
+  vals1 = [format_diff_value(r.value1) for r in d.rows]
+  vals2 = [format_diff_value(r.value2) for r in d.rows]
+
+  w1 = maximum(length, (header[1], paths...))
+  w2 = maximum(length, (header[2], vals1...))
+  w3 = maximum(length, (header[3], vals2...))
+
+  println(io, rpad(header[1], w1), "  ", rpad(header[2], w2), "  ", rpad(header[3], w3))
+  println(io, "-"^w1, "  ", "-"^w2, "  ", "-"^w3)
+  for (p, v1, v2) in zip(paths, vals1, vals2)
+    println(io, rpad(p, w1), "  ", rpad(v1, w2), "  ", rpad(v2, w3))
+  end
+end
+
+"""
+    compare(pars1::MTKParams, pars2::MTKParams) -> MTKParamsDiff
+
+Compare two `MTKParams` trees and return an [`MTKParamsDiff`](@ref) listing
+every parameter path where the two disagree (by `isequal`), along with the
+value on each side. Recurses into sub-systems; the path shown for each row is
+the dotted name (e.g. `"seat.spring.initial_stretch"`).
+
+`pars1` and `pars2` need not expose exactly the same parameters (e.g. built
+from different model variants): the union of both trees' paths is walked, and
+a path present on only one side shows up as a diff row with the other side
+marked `Absent`.
+
+If there are no differences, the returned `MTKParamsDiff` displays as
+"No differences.".
+"""
+function compare(pars1::MTKParams, pars2::MTKParams)
+  rows = MTKParamsDiffRow[]
+  compare_into!(rows, "", pars1, pars2)
+  return MTKParamsDiff(rows)
+end
+
+function compare(pars::MTKParams, prob::ODEProblem)
+  rows = MTKParamsDiffRow[]
+  ipars = transfer(pars, prob)
+  compare_into!(rows, "", pars, ipars)
+  return MTKParamsDiff(rows)
+end
+
+function compare_into!(rows::Vector{MTKParamsDiffRow}, path::String, x, y)
+  names1 = x isa MTKParams ? propertynames(x) : Symbol[]
+  names2 = y isa MTKParams ? propertynames(y) : Symbol[]
+
+  for nm in union(names1, names2)
+    subpath = isempty(path) ? string(nm) : path * "." * string(nm)
+
+    v1 = (x isa MTKParams && hasproperty(x, nm)) ? getproperty(x, nm) : _ABSENT
+    v2 = (y isa MTKParams && hasproperty(y, nm)) ? getproperty(y, nm) : _ABSENT
+
+    if v1 isa MTKParams || v2 isa MTKParams
+      compare_into!(rows, subpath, v1, v2)
+    elseif !isequal(v1, v2)
+      push!(rows, MTKParamsDiffRow(subpath, v1, v2))
+    end
+  end
+end
+
+"""
     ParamsNode(name, value)
 
 Internal wrapper used by the `AbstractTrees` integration so each field carries the
@@ -426,8 +614,19 @@ struct ParamsNode
     value::Any
 end
 
-AbstractTrees.children(x::MTKParams) =
-    [ParamsNode(n, getproperty(x, n)) for n in propertynames(x)]
+function AbstractTrees.children(x::MTKParams)
+  show_missing = get_options(x).show_missing
+  nodes = ParamsNode[]
+  for n in propertynames(x)
+    val = getproperty(x, n)
+    # Hide unset (`nothing`) and unresolved (`missing`) leaf values when the
+    # tree's display options say so (see `hide_missing!`). Sub-`MTKParams`
+    # branches are never `nothing`/`missing`, so they are unaffected.
+    (!show_missing && (val === nothing || val === missing)) && continue
+    push!(nodes, ParamsNode(n, val))
+  end
+  return nodes
+end
 
 AbstractTrees.children(n::ParamsNode) =
     n.value isa MTKParams ? AbstractTrees.children(n.value) : ()
@@ -449,10 +648,10 @@ end
 Base.show(io::IO, ::MIME"text/plain", x::MTKParams) =
     AbstractTrees.print_tree(io, x)
 
-PMapDict = Dict{SymbolicUtils.BasicSymbolicImpl.var"typeof(BasicSymbolicImpl)"{SymReal}, SymbolicUtils.BasicSymbolicImpl.var"typeof(BasicSymbolicImpl)"{SymReal}}
+PDict = Dict{SymbolicUtils.BasicSymbolicImpl.var"typeof(BasicSymbolicImpl)"{SymReal}, SymbolicUtils.BasicSymbolicImpl.var"typeof(BasicSymbolicImpl)"{SymReal}}
 
 """
-    pmap(model::System, pars::MTKParams) -> Dict
+    pdict(model::System, pars::MTKParams) -> Dict
 
 Build a `Dict{symbolic_parameter, value}` keyed by the symbolic parameters of
 `model`. This is the form accepted by [`update!`](@ref) and the cache-aware
@@ -461,7 +660,7 @@ Build a `Dict{symbolic_parameter, value}` keyed by the symbolic parameters of
 For the flat `Vector{Pair}` form expected by `ODEProblem` and the standard
 `SciMLBase.remake(prob; p = ...)`, write `model => pars` instead.
 """
-pmap(model::System, pars::MTKParams) = PMapDict(model => pars)
+pdict(model::System, pars::MTKParams) = PDict(model => pars)
 
 """
     Pair(model::System, pars::MTKParams) -> Vector{Pair}
@@ -556,7 +755,7 @@ end
 
 
 function Base.copy(x::MTKParams)
-    return MTKParams(get_parent(x), copy(get_defs(x)), copy(get_bound(x)), copy(get_unresolved(x)))
+    return MTKParams(get_parent(x), copy(get_defs(x)), copy(get_bound(x)), copy(get_unresolved(x)), copy(get_options(x)))
 end
 
 # fallback value conversion
@@ -650,7 +849,7 @@ end
 
 Pre-build a vector of `SymbolicIndexingInterface` setter functions, one per
 parameter field reachable from `x` (recursing into sub-systems). Pass the result,
-together with a parameter map from [`pmap`](@ref), to [`update!`](@ref) or
+together with a parameter map from [`pdict`](@ref), to [`update!`](@ref) or
 `SciMLBase.remake` to mutate an `ODEProblem` without rebuilding the setters on
 each call.
 
@@ -678,9 +877,9 @@ end
 
 
 """
-    resolve(val, param_dict::PMapDict)
+    resolve(val, param_dict::PDict)
 
-Reduce a [`pmap`](@ref) value to the concrete value a setter can write.
+Reduce a [`pdict`](@ref) value to the concrete value a setter can write.
 
 A parameter's value is not always concrete: it can be a symbolic expression of *other*
 parameters in the same map. Dyad's code generator propagates a parent parameter into a
@@ -694,7 +893,7 @@ write straight into the parameter buffer, so they have to be resolved here first
 otherwise the raw symbolic reaches the buffer and fails to convert to the parameter's
 type. Concrete values (the common case) skip substitution entirely.
 """
-function resolve(val, param_dict::PMapDict)
+function resolve(val, param_dict::PDict)
   val = Symbolics.value(val)
   symbolic_type(val) === NotSymbolic() && return val
   return Symbolics.value(symbolic_evaluate(val, param_dict))
@@ -707,12 +906,12 @@ end
 
 Mutate `prob` in place by applying every setter in `setters` whose target
 parameter appears in `param_dict`. `setters` is produced by [`cache`](@ref) and
-`param_dict` by [`pmap`](@ref). Values that are symbolic expressions of other
+`param_dict` by [`pdict`](@ref). Values that are symbolic expressions of other
 parameters in `param_dict` are resolved first (see [`resolve`](@ref)). Entries with
 `missing` values are skipped (the underlying setters do not accept `missing`).
 Returns `prob`.
 """
-function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_dict::PMapDict)
+function update!(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_dict::PDict)
 
   # Apply each setter by matching its parameter to the param_dict
   for setter in setters
@@ -742,13 +941,68 @@ original `prob` is left untouched, then applies the matching setters from
 `param_dict`. Use this when you need a new problem but want to keep the original
 intact.
 """
-function SciMLBase.remake(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_dict::PMapDict)
+function SciMLBase.remake(prob::ODEProblem, setters::Vector{SymbolicIndexingInterface.ParameterHookWrapper}, param_dict::PDict)
     prob′ = SciMLBase.remake(prob; p = copy(prob.p)) #NOTE: if p is not set to a copy then p maintains the original reference
     update!(prob′, setters, param_dict)
     # return SciMLBase.remake(prob′) # Note: using remake a 2nd time could be implemented to provide initialization for solvable parameters, see example below...
     return prob′
 end
 
+
+"""
+    transfer(pars::MTKParams, prob::ODEProblem) -> new_pars::MTKParams
+
+Return a copy of `pars` with every parameter it exposes updated to the value
+currently held by `prob` (read via `prob.ps`). `pars` itself is left
+unmodified.
+
+This generalizes patterns like
+```julia
+pars.seat.spring.initial_stretch = prob.ps[sys.seat.spring.initial_stretch]
+```
+to every parameter `pars` exposes, which is useful for pulling values that
+were solved for during `ODEProblem` initialization (e.g. Dyad's
+`p = missing, [guess=...]` initialization parameters) back into a `MTKParams`
+object.
+
+The model is recovered from `prob.f.sys`. If a parameter `pars` exposes
+cannot be read from `prob.ps` (not present on the model, or the value comes
+back `missing`), it is skipped with a warning and `new_pars` keeps `pars`'
+original value for that field.
+"""
+function transfer(pars::MTKParams, prob::ODEProblem)
+  new_pars = copy(pars)
+  transfer_into!(new_pars, prob.f.sys, prob)
+  return new_pars
+end
+
+function transfer_into!(pars::MTKParams, model::System, prob::ODEProblem)
+  for nm in propertynames(pars)
+    if !hasproperty(model, nm)
+      @warn "$(ModelingToolkit.get_name(model)) does not contain $nm"
+      continue
+    end
+
+    sym = getproperty(model, nm)
+    if sym isa System
+      transfer_into!(getproperty(pars, nm), sym, prob)
+    else
+      val = try
+        prob.ps[sym]
+      catch e
+        @warn "could not read `$(ModelingToolkit.getname(sym))` from `prob.ps`" exception=e
+        continue
+      end
+
+      if ismissing(val)
+        @warn "`$(ModelingToolkit.getname(sym))` resolved to `missing` in `prob.ps`, keeping previous value"
+        continue
+      end
+
+      setproperty!(pars, nm, val)
+    end
+  end
+end
 
 """
     @mtkparams name = Model(; sub = ChildComponent(p = 1), kw = value, ...)

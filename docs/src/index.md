@@ -110,7 +110,7 @@ Motor
     └─ l: 34
     ```
 
-A parameter map used for building `ODEProblem` can be generated from `pmap(sys::ModelingToolkit.System, p::MotorParams)`, for example
+A parameter map used for building `ODEProblem` can be generated from `pdict(sys::ModelingToolkit.System, p::MotorParams)`, for example
 
 ```julia
 @mtkcompile sys = Motor()
@@ -119,7 +119,7 @@ motor_pars.k=1
 motor_pars.r=2
 motor_pars.l=3
 
-ps = pmap(sys, motor_pars)
+ps = pdict(sys, motor_pars)
 ```
 
 Gives...
@@ -139,7 +139,7 @@ prob = ODEProblem(sys, ps, (0, 0.1))
 motor_pars2 = copy(motor_pars)
 motor_pars2.k = 4.0
 
-prob2 = remake(prob; p = pmap(sys, motor_pars2))
+prob2 = remake(prob; p = pdict(sys, motor_pars2))
 ```
 
 Now that our parameters are given by an object, we have many additional benefits:
@@ -261,6 +261,56 @@ Model
    └─ k: -1
 ```
 
+# Initialization: Recovering Solved Parameters
+Notice above that `seat.spring.initial_stretch` (and likewise for `car_and_suspension` and `wheel`) shows up as `missing`. These are Dyad-style `p = missing, [guess=...]` initialization parameters: they aren't given directly, they are *solved for* when the `ODEProblem` is built, using the guess as a starting point for the nonlinear solve.
+
+Once the problem is built, the solved value lives in `prob.ps`, not in the original `MTKParams` object:
+
+```julia
+@mtkcompile sys = ActiveSuspensionModel.Model()
+@mtkparams pars = ActiveSuspensionModel.Model()
+prob = ODEProblem(sys, [], (0, 10))
+
+pars.seat.spring.initial_stretch          # missing -- not yet solved
+prob.ps[sys.seat.spring.initial_stretch]  # the concrete value the initialization solve found
+```
+
+Rather than pulling each solved parameter back out by hand, `transfer(pars, prob)` returns a new `MTKParams` with *every* parameter it exposes updated to the value currently held by `prob`. `pars` itself is left untouched:
+
+```julia
+solved_pars = transfer(pars, prob)
+solved_pars.seat.spring.initial_stretch  # now holds the concrete, solved value
+```
+
+This is useful any time you want a parameter object that reflects what the model actually initialized to -- for example to inspect it, save it with `save_parameters`, or use it as the starting point for a later run.
+
+# Comparing Parameter Objects
+Once you're building several variations of a model's parameters -- for example a baseline and a tuned controller -- it's easy to lose track of exactly what changed between them. `compare(pars1, pars2)` walks both `MTKParams` trees and reports every parameter path where the two disagree:
+
+```julia
+@mtkparams org_pars = ActiveSuspensionModel.Model()
+@mtkparams pars = ActiveSuspensionModel.Model(pid = ActiveSuspensionModel.Controller(kp = 100.0))
+
+compare(org_pars, pars)
+```
+
+Gives...
+
+```julia
+Parameter  pars1  pars2
+---------  -----  -----
+pid.kp     1.0    100.0
+```
+
+If the two objects have identical values, `compare` simply reports that:
+
+```julia
+julia> compare(org_pars, org_pars)
+No differences.
+```
+
+`compare` also handles model variants that expose different parameters altogether, like the structural parameter case described below -- a parameter present on only one side shows up as a diff row with the other side marked as absent (`–`).
+
 
 # Speed
 As mentioned previously, using the keyword default patern for model parameter setting is not a good way to build several model variations, as this requires fully compiling/simplifying the model from scratch each time.  A better way was shown with ModelingToolkitParameters.jl using `remake` and proving an updated parameter map.  However, this way is still not the fastest.  The most efficient approach is to use `SymbolicIndexingInterface.jl`.  `ModelingToolkitParameters.jl` provides a `cache` function that implements the `SymbolicIndexingInterface.jl` utility to provide a more efficient use of `remake`.  The example below demonstrates this comparison.
@@ -275,19 +325,19 @@ using BenchmarkTools
 
 @mtkcompile model = ActiveSuspensionModel.Model()
 @mtkparams model_pars = ActiveSuspensionModel.Model()
-prob = ODEProblem(model, pmap(model, model_pars), (0, 10))
+prob = ODEProblem(model, pdict(model, model_pars), (0, 10))
 
 # Slow Option
 model_pars.seat.body.m = 200                                                # change parameters
-prob2 = remake(prob; p = pmap(model, model_pars))                           # remake ODEProblem
-time_slow = @belapsed prob2 = remake($prob; p = pmap($model, $model_pars))  # remake ODEProblem (timed)
+prob2 = remake(prob; p = pdict(model, model_pars))                           # remake ODEProblem
+time_slow = @belapsed prob2 = remake($prob; p = pdict($model, $model_pars))  # remake ODEProblem (timed)
 
 # Fast Option
 model_setters = cache(model, model_pars);# build cache (one time only)
 
 model_pars.seat.body.m = 300                                                            # change parameters
-prob3 = remake(prob, model_setters, pmap(model, model_pars))                            # fast remake ODEProblem
-time_fast = @belapsed prob3 = remake($prob, $model_setters, pmap($model, $model_pars))  # fast remake ODEProblem (timed)
+prob3 = remake(prob, model_setters, pdict(model, model_pars))                            # fast remake ODEProblem
+time_fast = @belapsed prob3 = remake($prob, $model_setters, pdict($model, $model_pars))  # fast remake ODEProblem (timed)
 
 @show time_slow time_fast # hide
 nothing # hide

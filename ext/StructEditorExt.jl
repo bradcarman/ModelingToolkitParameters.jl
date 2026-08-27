@@ -207,7 +207,7 @@ function StructEditor.editor(prob::ODEProblem, params::MTKParams;
         function do_run()
             progress.visible[] = true
             run.loading[] = true
-            prob′ = remake(prob, sys_cache, pmap(prob.f.sys, obs_value[]))
+            prob′ = remake(prob, sys_cache, pdict(prob.f.sys, obs_value[]))
             
             # Apply the exact same solver args and kwargs to the update step
             sol[] = with_logger(solve_logger) do 

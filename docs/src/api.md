@@ -10,7 +10,7 @@ ModelingToolkitParameters.MTKParams
 ## Parameter Map Generation
 
 ```@docs
-ModelingToolkitParameters.pmap
+ModelingToolkitParameters.pdict
 Base.Pair(::ModelingToolkitBase.System, ::MTKParams)
 ```
 
@@ -19,6 +19,26 @@ Base.Pair(::ModelingToolkitBase.System, ::MTKParams)
 ```@docs
 ModelingToolkitParameters.cache
 ModelingToolkitParameters.update!
+```
+
+## Transferring Solved Parameters
+
+```@docs
+ModelingToolkitParameters.transfer
+```
+
+## Comparing Parameter Objects
+
+```@docs
+ModelingToolkitParameters.compare
+ModelingToolkitParameters.MTKParamsDiff
+```
+
+## Display Options
+
+```@docs
+ModelingToolkitParameters.show_missing!
+ModelingToolkitParameters.hide_missing!
 ```
 
 ## Serialization

@@ -4,9 +4,9 @@ using ModelingToolkitParameters
 using SciMLBase
 using Test
 
-# A `pmap` value is not always concrete. Dyad's code generator propagates a parent
+# A `pdict` value is not always concrete. Dyad's code generator propagates a parent
 # parameter into a sub-component by declaring a same-named parameter on the child and
-# recording the *parent's symbolic* as the child's initial condition, so a `pmap` entry
+# recording the *parent's symbolic* as the child's initial condition, so a `pdict` entry
 # reads `branch₊leaf₊medium_data => branch₊medium_data`. Chains can be several levels
 # deep, and derived defaults (`k => medium_gain(medium_data)`) are expressions of them.
 #
@@ -85,8 +85,8 @@ medium_B = TestMedium("B", 5.0)
 mpars.medium_data = medium_B
 mpars.branch.gain = 7.0
 
-slow = remake(mprob; p = pmap(msys, mpars))          # the path that already worked
-fast = remake(mprob, msetters, pmap(msys, mpars))    # the cache path under test
+slow = remake(mprob; p = pdict(msys, mpars))          # the path that already worked
+fast = remake(mprob, msetters, pdict(msys, mpars))    # the cache path under test
 
 # struct-valued parameter propagated parent -> branch -> leaf (two levels of symbolics)
 @test fast.ps[msys.branch.medium_data].name == "B"
@@ -109,6 +109,6 @@ fast = remake(mprob, msetters, pmap(msys, mpars))    # the cache path under test
 @test mprob.ps[msys.branch.leaf.k] == 1.0
 
 # `update!` mutates in place and resolves the same way
-update!(mprob, msetters, pmap(msys, mpars))
+update!(mprob, msetters, pdict(msys, mpars))
 @test mprob.ps[msys.branch.leaf.medium_data].name == "B"
 @test mprob.ps[msys.branch.leaf.k] == 5.0
