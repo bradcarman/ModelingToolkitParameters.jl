@@ -18,6 +18,7 @@ Base.Pair(::ModelingToolkitBase.System, ::MTKParams)
 
 ```@docs
 ModelingToolkitParameters.cache
+ModelingToolkitParameters.resolve
 ModelingToolkitParameters.update!
 ```
 

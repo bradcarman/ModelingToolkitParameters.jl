@@ -2,3 +2,6 @@ CLAUDE.md
 /Manifest.toml
 docs/build/
 .claude/
+publish/release_breaking.md
+publish/release.md
+publish/release.sh
